@@ -1,0 +1,25 @@
+--train_header query,doc,q2
+--train_model_header s2s_tokenize:query:doc:input,query,doc,q2
+--eval_header query,doc,q2
+--eval_model_header s2s_tokenize:query:doc:input,query,doc,q2
+--train_dir ./samsum_train
+--eval_dir ./samsum_test
+--pred_dir ./samsum_valid
+--eval_metrics bleu
+--predict_header query,doc
+--predict_model_header s2s_tokenize:query:input,query,doc
+--result_header query,doc
+--output_type generation
+--task seq2seq
+--max_length 62
+--min_length 11
+--no_repeat_ngram_size 3
+--num_beams 6
+--tok_max_length 512
+--model lidiya/bart-large-xsum-samsum
+--trainer rl
+--eos_replace False
+--post_replace False
+--save_steps 10000000
+
+bo

@@ -1,0 +1,35 @@
+--train_header query,doc,q2
+--train_model_header s2s_tokenize:query:doc:input,query,doc,q2
+--eval_header query,doc,q2
+--eval_model_header s2s_tokenize:query:doc:input,query,doc,q2
+--train_dir /mnt/shared_data/datas/cnn_train_no_pre
+--eval_dir /mnt/shared_data/datas/cnn_test_no_pre
+--pred_dir /mnt/shared_data/datas/cnn_validation_no_pre
+--eval_metrics bleu
+--predict_header query,doc
+--predict_model_header s2s_tokenize:query:input,query,doc
+--result_header query,doc
+--output_type generation
+--task seq2seq
+--max_length 142
+--training_max_length 142
+--min_length 56
+--training_min_length 56
+--length_penalty 2
+--training_length_penalty 2
+--no_repeat_ngram_size 3
+--training_no_repeat_ngram_size 3
+--num_beams 4
+--training_num_beams 16
+--training_num_beams_groups 16
+--tok_max_length 1024
+--model Yale-LILY/brio-cnndm-uncased
+--trainer rl
+--eos_replace False
+--post_replace False
+--save_steps 10000000
+--increase_id fix_decrease
+--rouge_type 'cnn'
+--reward_type 'rouges'
+
+bo

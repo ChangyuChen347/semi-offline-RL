@@ -1,0 +1,24 @@
+--train_header query,doc,q2
+--train_model_header s2s_tokenize:query:doc:input,query,doc,q2
+--eval_header query,doc,q2
+--eval_model_header s2s_tokenize:query:doc:input,query,doc,q2
+--train_dir /mnt/shared_data/datas/squad_train
+--eval_dir sample/squad_test_pre
+--pred_dir sample/squad_test_pre
+--eval_metrics bleu
+--predict_header query,doc
+--predict_model_header s2s_tokenize:query:input,query,doc
+--result_header query,doc
+--output_type generation
+--task seq2seq
+--max_length 64
+--min_length 0
+--num_beams 4
+--tok_max_length 512
+--model lmqg/t5-large-squad-qg
+--trainer rl
+--eos_replace False
+--post_replace False
+--save_steps 10000000
+--no_repeat_ngram_size 0
+bo
