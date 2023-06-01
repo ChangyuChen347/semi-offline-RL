@@ -1298,16 +1298,13 @@ class Trainer(Trainer):
 
         Subclass and override for custom behavior.
         """
-
         if self.smoother is not None and "labels" in inputs:
             #labels = inputs.pop("labels")
             labels = inputs['labels']
         else:
             labels = None
-
         if isinstance(model, torch.nn.DataParallel) or isinstance(model, torch.nn.parallel.DistributedDataParallel):
             tmp_tokenizer = model.module.tokenizer
-
         else:
             tmp_tokenizer = model.tokenizer
         self.tmp_tokenizer = tmp_tokenizer
@@ -1325,7 +1322,6 @@ class Trainer(Trainer):
 
         beams = 16
         seq_num = 16
-
         if self.args.seq_decode_model == 't5':
             eos_token_id = 1
             pad_token_id = 0
@@ -1346,17 +1342,13 @@ class Trainer(Trainer):
         q2 = inputs['q2']
         if '<#QUERY#>' in q2[0]:
             q2 = [e.split('<#QUERY#>')[0] for e in q2]
-
         mask_labels = None
         masked_pos_shift = None
         masked_pos_non_shift = None
         base_y_b = None
-
         if self.args.use_normal_ce:
             inputs_ce = copy.deepcopy(inputs)
-
         inputs['not_seq_decode'] = True
-
         if self.args.seq_decode_model == 't5':
             eos_token_id = 1
             pad_token_id = 0
@@ -1370,7 +1362,6 @@ class Trainer(Trainer):
         model.train()
         if self.args.use_eval:
             model.eval()
-
         def compute_acc_and_loss(max_ids, labels_, mp, log_probs_all):
             tot_cont = 0
             dif_cont = 0
@@ -1387,13 +1378,13 @@ class Trainer(Trainer):
             self.his_says_probs.append(says_probs.mean().clone().detach().cpu().numpy())
             self.his_comma_probs.append(comma_probs.mean().clone().detach().cpu().numpy())
             pred_acc = max_ids == labels_
-            # print(pred_acc)
+
             batch_p_numpy = mp.clone().detach().cpu().numpy()
             batch_2_gram_pos = []
             batch_3_gram_pos = []
             batch_4_gram_pos = []
             batch_n_gram_pos = []
-            # print(batch_p_numpy)
+
             labels_np = labels_.cpu().clone().numpy()
             for k, p_n in enumerate(batch_p_numpy):
                 cont_mask_num = 0
@@ -1424,8 +1415,7 @@ class Trainer(Trainer):
                 batch_3_gram_pos.append(_3_gram_pos)
                 batch_4_gram_pos.append(_4_gram_pos)
                 batch_n_gram_pos.append(_n_gram_pos)
-            # print(batch_2_gram_pos)
-            # print(batch_3_gram_pos)
+
             batch_2_gram_pos = torch.tensor(batch_2_gram_pos).long().cuda()
             batch_3_gram_pos = torch.tensor(batch_3_gram_pos).long().cuda()
             batch_4_gram_pos = torch.tensor(batch_4_gram_pos).long().cuda()
@@ -1464,8 +1454,6 @@ class Trainer(Trainer):
 
             if tot_cont != 0:
                 self.his_dif_cont_rate.append(dif_cont / tot_cont)
-
-
         pre_gen_scores = None
         not_normal_log_probs = None
         if self.args.kd_inputs:
@@ -1510,7 +1498,6 @@ class Trainer(Trainer):
                     pre_gen_scores = pre_gen_scores.reshape(-1, 1)
                 else:
                     pre_gen_scores = None
-
                 cands = [t.split('<#SCORE#>')[0] for t in cands]
 
                 cands = add_padding_(cands, pad_id=-100)
@@ -1685,63 +1672,57 @@ class Trainer(Trainer):
 
         if (model.config.sample_num != 0 or self.args.cand_num !=1):
             cand_mask = ~log_probs.data.eq(0)
-            _116_mask = True
-            if _116_mask:
-                if self.args.seq_decode_model == 'bart':
+            if self.args.seq_decode_model == 'bart':
 
-                    new_cand_mask = cand_mask & ~(
-                            (y_s != 2) & (y_s != 0) & (
-                            y_s != 1))
-                    cand_mask = cand_mask & (y_s != 2) & (
-                            y_s != 0) & (y_s != 1)
+                new_cand_mask = cand_mask & ~(
+                        (y_s != 2) & (y_s != 0) & (
+                        y_s != 1))
+                cand_mask = cand_mask & (y_s != 2) & (
+                        y_s != 0) & (y_s != 1)
 
-                    batch_size = labels_.shape[0]
+                batch_size = labels_.shape[0]
+            elif self.args.seq_decode_model == 't5':
+                cand_mask = cand_mask & (y_s != 259) & (y_s != 260) & (y_s != 261) & (y_s != eos_token_id) & (
+                            y_s != pad_token_id) & (y_s != 250100) & (y_s != 250101)
+            elif self.args.seq_decode_model == 't5' and self.model.config.tokenizer_name == 't5-small':
+                cand_mask = cand_mask & (y_s != 5) & (y_s != 6) & (y_s != eos_token_id) & (y_s != 2)
+            elif self.args.seq_decode_model == 'pegasus':
+                new_cand_mask = cand_mask & ~((y_s != eos_token_id) & (y_s != pad_token_id))
+                cand_mask = cand_mask & (y_s != eos_token_id) & (y_s != pad_token_id)
+            if self.args.exclude_eos:
+                cand_mask = cand_mask & (y_s != eos_token_id)
 
+            if self.args.new_cand_mask:
+                cand_mask = cand_mask.reshape(batch_size, -1, cand_mask.shape[-1])
+                # print(cand_mask)
+                cand_num = cand_mask.shape[1]
+                cand_mask = cand_mask.sum(1)
+                cand_mask = cand_mask.data.eq(cand_num)
+                cand_mask = cand_mask.unsqueeze(1).repeat(1, cand_num, 1)
+                cand_mask = cand_mask.reshape(-1, cand_mask.shape[-1])
 
-                if self.args.seq_decode_model == 't5':
-                    cand_mask = cand_mask & (y_s != 259) & (y_s != 260) & (y_s != 261) & (y_s != eos_token_id) & (
-                                y_s != pad_token_id) & (y_s != 250100) & (y_s != 250101)
-                if self.args.seq_decode_model == 't5' and self.model.config.tokenizer_name == 't5-small':
-                    cand_mask = cand_mask & (y_s != 5) & (y_s != 6) & (y_s != eos_token_id) & (y_s != 2)
-                if self.args.seq_decode_model == 'pegasus':
-                    new_cand_mask = cand_mask & ~((y_s != eos_token_id) & (y_s != pad_token_id))
-                    cand_mask = cand_mask & (y_s != eos_token_id) & (y_s != pad_token_id)
+            if self.args.new_cand_mask_y_s:
+                new_cand_mask = new_cand_mask.reshape(batch_size, -1, cand_mask.shape[-1])
+                new_cand_mask = new_cand_mask.sum(1)
+                new_cand_mask = new_cand_mask > 0
+                new_cand_mask = new_cand_mask.unsqueeze(1).repeat(1, cand_num, 1)
+                new_cand_mask = new_cand_mask.reshape(-1, cand_mask.shape[-1])
+                y_s = y_s * ~new_cand_mask + second_kd_inputs_labels.unsqueeze(1).repeat(1, cand_num, 1).reshape(-1,
+                                                                                                                 cand_mask.shape[
+                                                                                                                     -1]) * new_cand_mask
 
-                # cand_mask = cand_mask & (y_s != 264) & (y_s != 250100) & (y_s != 250101)
-                if self.args.exclude_eos:
-                    cand_mask = cand_mask & (y_s != eos_token_id)
+            log_probs = log_probs * self.args.scale
 
-                if self.args.new_cand_mask:
-                    cand_mask = cand_mask.reshape(batch_size, -1, cand_mask.shape[-1])
-                    # print(cand_mask)
-                    cand_num = cand_mask.shape[1]
-                    cand_mask = cand_mask.sum(1)
-                    cand_mask = cand_mask.data.eq(cand_num)
-                    cand_mask = cand_mask.unsqueeze(1).repeat(1, cand_num, 1)
-                    cand_mask = cand_mask.reshape(-1, cand_mask.shape[-1])
+            not_normal_log_probs = log_probs.clone()
 
-                if self.args.new_cand_mask_y_s:
-                    new_cand_mask = new_cand_mask.reshape(batch_size, -1, cand_mask.shape[-1])
-                    new_cand_mask = new_cand_mask.sum(1)
-                    new_cand_mask = new_cand_mask > 0
-                    new_cand_mask = new_cand_mask.unsqueeze(1).repeat(1, cand_num, 1)
-                    new_cand_mask = new_cand_mask.reshape(-1, cand_mask.shape[-1])
-                    y_s = y_s * ~new_cand_mask + second_kd_inputs_labels.unsqueeze(1).repeat(1, cand_num, 1).reshape(-1,
-                                                                                                                     cand_mask.shape[
-                                                                                                                         -1]) * new_cand_mask
+            for_count_y_s = y_s * cand_mask + torch.ones_like(y_s).long().cuda() * -1 * ~cand_mask
+            for_count_y_s = for_count_y_s.cpu().numpy()
 
-                log_probs = log_probs * self.args.scale
-
-                not_normal_log_probs = log_probs.clone()
-
-                for_count_y_s = y_s * cand_mask + torch.ones_like(y_s).long().cuda() * -1 * ~cand_mask
-                for_count_y_s = for_count_y_s.cpu().numpy()
-
-                cand_mask = 1 / (((cand_mask.sum(-1)) ** length_penalty).unsqueeze(1))
-                cand_mask = torch.where(torch.isinf(cand_mask), torch.full_like(cand_mask, 0), cand_mask)
-                if self.args.length_normalize_4_rl:
-                    log_probs = log_probs * cand_mask
-                    log_probs = log_probs / (model.config.sample_num + 1) / self.args.cand_num
+            cand_mask = 1 / (((cand_mask.sum(-1)) ** length_penalty).unsqueeze(1))
+            cand_mask = torch.where(torch.isinf(cand_mask), torch.full_like(cand_mask, 0), cand_mask)
+            if self.args.length_normalize_4_rl:
+                log_probs = log_probs * cand_mask
+                log_probs = log_probs / (model.config.sample_num + 1) / self.args.cand_num
 
 
         start = time.time()
@@ -1751,7 +1732,7 @@ class Trainer(Trainer):
             rl_loss, b_reward_tensor, b_zero_tks, zero_tks, labels_zero_tks, all_gen_traces_tk, all_gen_b_traces_tk, all_reward, other_reward = self.rl_ids_2_str(y_b, y_s, max_ids, masked_ids, input_ids, labels_,
                                                   non_zero_sum_tensor, log_probs, q2, tmp_tokenizer, y_zero_b,
                                                   y_zero_s, y_zero_labels, base_y_b, truth_log_probs, pre_gen_scores, predict_baseline=predict_baseline, not_normal_log_probs=not_normal_log_probs, raw_src=inputs['query'], inputs_brio=inputs_brio, refs=refs,
-                                        # base_traces=s_res)
+
                         base_traces=second_kd_inputs_labels)
             self.current_target = all_reward
             reward_dist_dict = {}

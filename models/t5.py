@@ -243,10 +243,7 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
         super().__init__(config)
 
         self.config = config
-
         try:
-
-
             self.mask_input = config.mask_input
             self.mask_rate = config.mask_rate
             self.out_mask_rate = config.out_mask_rate
@@ -264,15 +261,6 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
             print(e)
             self.is_debug=True
             pass
-        # if self.config.baseline_head:
-        #     if self.config.lm_logit_predict:
-        #         self.baseline_head1 = torch.nn.Linear(self.model.shared.num_embeddings+1, 256, bias=True)
-        #     else:
-        #     self.baseline_head1 = torch.nn.Linear(config.d_model, 256, bias=True)
-        # self.baseline_head1 = torch.nn.Linear(config.d_model, 256, bias=True)
-        # # self.baseline_head1 = torch.nn.Linear(self.shared.num_embeddings, 256, bias=True)
-        # self.baseline_head2 = torch.nn.Linear(256, 64, bias=True)
-        # self.baseline_head3 = torch.nn.Linear(64, 1, bias=True)
     def scoring_mode(self):
         self.is_scoring_mode = True
 
@@ -426,12 +414,7 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
             loss_fct = CrossEntropyLoss(ignore_index=-100)
             loss = loss_fct(lm_logits.view(-1, lm_logits.size(-1)), labels.view(-1))
             # TODO(thom): Add z_loss https://github.com/tensorflow/mesh/blob/fa19d69eafc9a482aff0b59ddd96b025c0cb207d/mesh_tensorflow/layers.py#L666
-        # print(labels)
-        # from transformers import T5Tokenizer
-        # tokenizer = T5Tokenizer.from_pretrained("t5-v1_1-small")
-        # print(tokenizer.convert_ids_to_tokens(labels[0]))
-        # print(tokenizer.decode(labels[0], skip_special_tokens=True))
-        # assert 1==0
+
         if not return_dict:
             output = (lm_logits,) + decoder_outputs[1:] + encoder_outputs
             return ((loss,) + output) if loss is not None else output
@@ -448,176 +431,6 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
             encoder_attentions=encoder_outputs.attentions,
         )
 
-    def normal_forward_v(
-        self,
-        input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        decoder_input_ids: Optional[torch.LongTensor] = None,
-        decoder_attention_mask: Optional[torch.BoolTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        decoder_head_mask: Optional[torch.FloatTensor] = None,
-        cross_attn_head_mask: Optional[torch.Tensor] = None,
-        encoder_outputs: Optional[Tuple[Tuple[torch.Tensor]]] = None,
-        past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        decoder_inputs_embeds: Optional[torch.FloatTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ) -> Union[Tuple[torch.FloatTensor], Seq2SeqLMOutput]:
-        r"""
-        labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
-            Labels for computing the sequence classification/regression loss. Indices should be in `[-100, 0, ...,
-            config.vocab_size - 1]`. All labels set to `-100` are ignored (masked), the loss is only computed for
-            labels in `[0, ..., config.vocab_size]`
-
-        Returns:
-
-        Examples:
-
-        ```python
-        >>> from transformers import T5Tokenizer, T5ForConditionalGeneration
-
-        >>> tokenizer = T5Tokenizer.from_pretrained("t5-small")
-        >>> model = T5ForConditionalGeneration.from_pretrained("t5-small")
-
-        >>> # training
-        >>> input_ids = tokenizer("The <extra_id_0> walks in <extra_id_1> park", return_tensors="pt").input_ids
-        >>> labels = tokenizer("<extra_id_0> cute dog <extra_id_1> the <extra_id_2>", return_tensors="pt").input_ids
-        >>> outputs = model(input_ids=input_ids, labels=labels)
-        >>> loss = outputs.loss
-        >>> logits = outputs.logits
-
-        >>> # inference
-        >>> input_ids = tokenizer(
-        ...     "summarize: studies have shown that owning a dog is good for you", return_tensors="pt"
-        >>> ).input_ids  # Batch size 1
-        >>> outputs = model.generate(input_ids)
-        >>> print(tokenizer.decode(outputs[0], skip_special_tokens=True))
-        >>> # studies have shown that owning a dog is good for you.
-        ```"""
-        use_cache = use_cache if use_cache is not None else self.config.use_cache
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
-        # FutureWarning: head_mask was separated into two input args - head_mask, decoder_head_mask
-        if head_mask is not None and decoder_head_mask is None:
-            if self.config.num_layers == self.config.num_decoder_layers:
-                warnings.warn(__HEAD_MASK_WARNING_MSG, FutureWarning)
-                decoder_head_mask = head_mask
-
-        # Encode if needed (training, first prediction pass)
-        if encoder_outputs is None:
-            # Convert encoder inputs in embeddings if needed
-            encoder_outputs = self.encoder(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                inputs_embeds=inputs_embeds,
-                head_mask=head_mask,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
-                return_dict=return_dict,
-            )
-        elif return_dict and not isinstance(encoder_outputs, BaseModelOutput):
-            encoder_outputs = BaseModelOutput(
-                last_hidden_state=encoder_outputs[0],
-                hidden_states=encoder_outputs[1] if len(encoder_outputs) > 1 else None,
-                attentions=encoder_outputs[2] if len(encoder_outputs) > 2 else None,
-            )
-
-        #hidden_states = encoder_outputs[0]
-
-
-
-
-        if self.model_parallel:
-            torch.cuda.set_device(self.decoder.first_device)
-
-        if labels is not None and decoder_input_ids is None and decoder_inputs_embeds is None:
-            # get decoder inputs from shifting lm labels to the right
-            decoder_input_ids = self._shift_right(labels)
-
-        if self.is_scoring_mode:
-            cand_num = decoder_input_ids.size(1)
-            hidden_states = encoder_outputs[0]
-            hidden_states = torch.repeat_interleave(hidden_states, cand_num, dim=0)
-            attention_mask = torch.repeat_interleave(attention_mask, cand_num, dim=0)
-            decoder_input_ids = decoder_input_ids.view(-1, decoder_input_ids.size(-1))
-            decoder_attention_mask = decoder_attention_mask.view(-1, decoder_attention_mask.size(-1))
-        else:
-            hidden_states = encoder_outputs[0]
-
-        # Set device for model parallelism
-        if self.model_parallel:
-            torch.cuda.set_device(self.decoder.first_device)
-            hidden_states = hidden_states.to(self.decoder.first_device)
-            if decoder_input_ids is not None:
-                decoder_input_ids = decoder_input_ids.to(self.decoder.first_device)
-            if attention_mask is not None:
-                attention_mask = attention_mask.to(self.decoder.first_device)
-            if decoder_attention_mask is not None:
-                decoder_attention_mask = decoder_attention_mask.to(self.decoder.first_device)
-
-        # Decode
-        decoder_outputs = self.decoder(
-            input_ids=decoder_input_ids,
-            attention_mask=decoder_attention_mask,
-            inputs_embeds=decoder_inputs_embeds,
-            past_key_values=past_key_values,
-            encoder_hidden_states=hidden_states,
-            encoder_attention_mask=attention_mask,
-            head_mask=decoder_head_mask,
-            cross_attn_head_mask=cross_attn_head_mask,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
-
-        sequence_output = decoder_outputs[0]
-
-        # Set device for model parallelism
-        if self.model_parallel:
-            torch.cuda.set_device(self.encoder.first_device)
-            self.lm_head = self.lm_head.to(self.encoder.first_device)
-            sequence_output = sequence_output.to(self.lm_head.weight.device)
-
-        if self.config.tie_word_embeddings:
-            # Rescale output before projecting on vocab
-            # See https://github.com/tensorflow/mesh/blob/fa19d69eafc9a482aff0b59ddd96b025c0cb207d/mesh_tensorflow/transformer/transformer.py#L586
-            sequence_output = sequence_output * (self.model_dim**-0.5)
-
-        lm_logits = self.lm_head(sequence_output)
-        value = self.v_head(sequence_output).squeeze(-1)
-        loss = None
-        if labels is not None:
-            loss_fct = CrossEntropyLoss(ignore_index=-100)
-            loss = loss_fct(lm_logits.view(-1, lm_logits.size(-1)), labels.view(-1))
-            # TODO(thom): Add z_loss https://github.com/tensorflow/mesh/blob/fa19d69eafc9a482aff0b59ddd96b025c0cb207d/mesh_tensorflow/layers.py#L666
-        # print(labels)
-        # from transformers import T5Tokenizer
-        # tokenizer = T5Tokenizer.from_pretrained("t5-v1_1-small")
-        # print(tokenizer.convert_ids_to_tokens(labels[0]))
-        # print(tokenizer.decode(labels[0], skip_special_tokens=True))
-        # assert 1==0
-        if not return_dict:
-            # output = (lm_logits,) + decoder_outputs[1:] + encoder_outputs
-            output = (lm_logits,) + decoder_outputs[1:2] + (value,)
-            return output
-            return ((loss,) + output) if loss is not None else output
-
-        return Seq2SeqLMOutput(
-            loss=loss,
-            logits=lm_logits,
-            past_key_values=decoder_outputs.past_key_values,
-            decoder_hidden_states=decoder_outputs.hidden_states,
-            decoder_attentions=decoder_outputs.attentions,
-            cross_attentions=decoder_outputs.cross_attentions,
-            encoder_last_hidden_state=encoder_outputs.last_hidden_state,
-            encoder_hidden_states=encoder_outputs.hidden_states,
-            encoder_attentions=encoder_outputs.attentions,
-        )
     def rl_forward(
             self,
             input_ids=None,
@@ -704,20 +517,14 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
 
         bs = None
         if labels is not None and decoder_input_ids is None and decoder_inputs_embeds is None:
-            # get decoder inputs from shifting lm labels to the right
-            #x = self.tokenizer.decode([259,250100, 250101, 260, 263, 276, 549, 212916, 159552])
-            #print(x)
             bs = labels.shape[0]
             if mask_decoder_inputs:
                 bs = labels.shape[0]
-
                 non_zero_labels = ~(
                         labels.data.eq(0) | labels.data.eq(1) | labels.data.eq(-100))  # 0 pad 1 <\s> -100 pad
-                # 1 eos 0 pad -100 ce pad
                 non_zero_sum_tensor = non_zero_labels.sum(-1)  # b
                 non_zero_sum = non_zero_sum_tensor.detach().cpu().numpy().tolist()
                 non_masked_pos_shift = torch.zeros_like(labels)
-
                 if mask_labels is None:
                     mask_labels = labels.detach().cpu().clone()  # bs, seq
                     mask_labels_np = mask_labels.numpy()
@@ -736,11 +543,8 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
                             range(len(output_ids))]
                         return tks
                     tmp_tks = get_tks(mask_labels_np)
-
-
                     masked_pos_shift = torch.zeros_like(mask_labels)  # bs, seq
                     masked_pos_non_shift = torch.zeros_like(mask_labels)  # bs, seq
-
                     labels_numpy = mask_labels_np
                     should_mask_pos = np.zeros(labels_numpy.shape)
                     labels_numpy = labels_numpy.tolist()
@@ -749,13 +553,6 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
                         cand_pos = []
                         k = 0
                         while k < non_zero_sum[i] - self.tail_unmask_num:
-                            # if k + 3 < non_zero_sum[i] and label_np[k] == 264 and label_np[k + 1] == 31671 and label_np[k + 2] == 23257 and label_np[
-                            #     k + 3] == 264:
-                            #     k += 4
-                            # if k + 2 < non_zero_sum[i] and label_np[k] == 264 and label_np[k+1] == 152152 and label_np[k+2] == 264:
-                            #     k += 3
-                            # if tmp_tks[i][k] == '-':
-                            #     print(label_np[k], tmp_tks[i][k])
                             if tmp_tks[i][k][0] != '▁':  # if pre is mask this is not mask it will connect
                                 should_mask_pos[i][k] = 1
                             else:
@@ -776,15 +573,7 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
                             k += 1
 
                         def get_masked_token(tk_id):
-                            p = random.random()
-                            self.keep_prob = 0
-                            self.random_prob = 0
-                            if p < self.keep_prob:
-                                return tk_id
-                            elif p < self.keep_prob + self.random_prob:
-                                return random.randint(0, self.vocab_size - 1)
-                            else:
-                                return self.mask_id
+                            return self.mask_id
 
                         sample_num = int(len(cand_pos) * self.mask_rate)
                         sample_pos = np_rand.choice(a=np.array(cand_pos), size=sample_num, replace=False).tolist()
@@ -829,13 +618,6 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
                                 masked_pos_non_shift[i][idx] = j
                         else:
                             tot = 0
-                            # for idx, j in enumerate(cand_pos):
-                            #     if random.random() < self.mask_rate:
-                            #         if self.mask_input:
-                            #             mask_labels[i][j] = get_masked_token(mask_labels[i][j])
-                            #         masked_pos_shift[i][tot] = j + 1
-                            #         masked_pos_non_shift[i][tot] = j
-                            #         tot += 1
                             for idx, j in enumerate(sample_pos):
                                 if self.mask_input:
                                     mask_labels[i][j] = get_masked_token(mask_labels[i][j])
@@ -846,7 +628,6 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
                                     non_masked_pos_shift[i][idx] = j
 
                 decoder_input_ids = self._shift_right(mask_labels)  # 0, 1, 2  pred 1, 2,
-                # print(decoder_input_ids)
             else:
                 decoder_input_ids = self._shift_right(labels)
 
@@ -861,9 +642,6 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
                 attention_mask = attention_mask.to(self.decoder.first_device)
             if decoder_attention_mask is not None:
                 decoder_attention_mask = decoder_attention_mask.to(self.decoder.first_device)
-        # Decode
-        # print(decoder_attention_mask)
-
         if self.is_scoring_mode:
             # cand_num = decoder_input_ids.size(1)
             if len(decoder_input_ids.shape) != 3:
@@ -936,7 +714,6 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
                     to_sample_lm_logits = to_sample_lm_logits.clone().detach()
                 to_sample_probs = torch.softmax(to_sample_lm_logits, dim=-1)
 
-                #g = tokenizer(',')
                 '''
                 topk
                 '''
@@ -949,35 +726,15 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
                 mp_long = mp.long()
                 pad_2_zero_labels = labels * ~(labels.data.eq(-100) | labels.data.eq(1))  # -100 -> 0#
 
-                # lm_logits_masked = gather_seq_out_by_pos(
-                #     lm_logits, masked_pos_non_shift)
-                # labels_masked = gather_seq_out_by_pos(
-                #     labels.unsqueeze(-1), masked_pos_non_shift)  # mask_pos_tokens + 0 position tokens
-                #
-                # labels_masked = labels_masked.squeeze(-1)
-                # probs = torch.softmax(lm_logits_masked,
-                #                       dim=-1)  # start 输出0 0的位置输出的是1， 如果没有shift的话，add的时候0的位置的输出的max_id是加到位置1上，如果shift了
-                # log_probs = torch.log(probs + 1e-8)
-                # _, max_ids = torch.max(log_probs, dim=-1)  # mask_pos + 0 position tokens
+
                 zeros = torch.zeros_like(labels, dtype=torch.long).cuda()
                 pads = zeros.clone()
                 _, max_ids = torch.max(log_probs, dim=-1)
-                # y_b = labels.clone()
-                # y_b = torch.cat([torch.zeros(bs, 1, dtype=torch.long).cuda(), y_b], dim=-1)
-                # y_b.scatter_(1, masked_pos_shift, max_ids)
+
 
                 y_b = pad_2_zero_labels * (1-mp_long) + max_ids * mp_long
                 y_zero_b = pads * (1-mp_long) + max_ids * mp_long
 
-                # non_mp = torch.zeros((bs, seq_len + 1)).cuda().scatter_(1, non_masked_pos_shift,
-                #                                                         torch.ones((bs, seq_len + 1)).cuda())
-                # non_mp = non_mp[:, 1:]
-                # non_mp_long = non_mp.long()
-                # y_b_g = pad_2_zero_labels * (1 - mp_long) + max_ids * mp_long
-
-                # y_b_g = y_b_g * (1 - non_mp_long) + max_ids * non_mp_long
-
-                # y_b_g_m = y_b_g * (1 - mp_long) + torch.ones_like(max_ids).long().cuda() * self.mask_id * mp_long
 
                 sample_num = 0
                 if not ce:
@@ -987,28 +744,19 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
                     if self.config.sample_method == 'multi':
                         _, s2, s3 = probs.shape
                         probs = probs.reshape(-1, s3)
-                        if self.config.use_logit:
-                            logits = lm_logits.reshape(-1, s3)
+                        logits = lm_logits.reshape(-1, s3)
                         masked_ids = torch.multinomial(probs, sample_num + 1, replacement=True)
                         # bs * seq_len, sample_num
-                        if self.config.use_logit:
-                            mask = torch.zeros_like(logits).cuda().long().scatter_(1, masked_ids,
-                                                                                   torch.ones_like(
-                                                                                       masked_ids).long().cuda())
-                            probs = torch.softmax(mask * logits, -1)
 
-                            # print(probs[0])
+                        mask = torch.zeros_like(logits).cuda().long().scatter_(1, masked_ids,
+                                                                               torch.ones_like(
+                                                                                   masked_ids).long().cuda())
+                        probs = torch.softmax(mask * logits, -1)
+
                         prob = torch.gather(probs, dim=1, index=masked_ids)
-                        if self.config.prob_w:
-                            prob_w = torch.gather(probs.detach().clone(), dim=1, index=masked_ids)
-
                         masked_ids = masked_ids.reshape(-1, s2, sample_num + 1).transpose(1, 2)
-                        if self.config.prob_w:
-                            prob_w = prob_w.reshape(-1, s2, sample_num + 1).transpose(1, 2)
                         prob = prob.reshape(-1, s2, sample_num + 1).transpose(1, 2)
                         log_probs = torch.log(prob)
-                        if self.config.prob_w:
-                            log_probs = log_probs * prob_w
                         masked_ids = masked_ids.reshape(bs * (sample_num + 1), s2)
                         log_probs = log_probs.reshape(bs * (sample_num + 1), s2)
 
@@ -1020,117 +768,25 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
                         mp = mp.unsqueeze(1).expand(-1, sample_num + 1, -1)
                         mp = mp.reshape(bs * (sample_num + 1), -1)
 
-                        # non_mp_long = non_mp_long.unsqueeze(1).expand(-1, sample_num + 1, -1)
-                        # non_mp_long = non_mp_long.reshape(bs * (sample_num + 1), -1)
-                        # non_mp = non_mp.unsqueeze(1).expand(-1, sample_num + 1, -1)
-                        # non_mp = non_mp.reshape(bs * (sample_num + 1), -1)
                         pads = pads.unsqueeze(1).expand(-1, sample_num + 1, -1)
                         pads = pads.reshape(bs * (sample_num + 1), -1)
-                else:
-                    # multi_dist = Categorical(to_sample_probs)
-                    # masked_ids = multi_dist.sample()
-                    # print(masked_ids.shape)
-                    # print(labels.shape)
-                    # if not self.do_rl:
-                    #     masked_ids = labels
-                    # else:
-                    #     multi_dist = Categorical(to_sample_probs)
-                    #     masked_ids = multi_dist.sample()
-                    _, s2, s3 = probs.shape
-                    probs = probs.reshape(-1, s3)
-                    if self.config.use_logit:
-                        logits = lm_logits.reshape(-1, s3)
-                    masked_ids = torch.multinomial(probs, sample_num + 1, replacement=True)
-                    # bs * seq_len, sample_num
-                    if self.config.use_logit:
-                        mask = torch.zeros_like(logits).cuda().long().scatter_(1, masked_ids,
-                                                                               torch.ones_like(
-                                                                                   masked_ids).long().cuda())
-                        probs = torch.softmax(mask * logits, -1)
-
-                        # print(probs[0])
-                    prob = torch.gather(probs, dim=1, index=masked_ids)
-                    if self.config.prob_w:
-                        prob_w = torch.gather(probs.detach().clone(), dim=1, index=masked_ids)
-
-                    masked_ids = masked_ids.reshape(-1, s2, sample_num + 1).transpose(1, 2)
-                    if self.config.prob_w:
-                        prob_w = prob_w.reshape(-1, s2, sample_num + 1).transpose(1, 2)
-                    prob = prob.reshape(-1, s2, sample_num + 1).transpose(1, 2)
-                    log_probs = torch.log(prob)
-                    if self.config.prob_w:
-                        log_probs = log_probs * prob_w
-                    masked_ids = masked_ids.reshape(bs * (sample_num + 1), s2)
-                    log_probs = log_probs.reshape(bs * (sample_num + 1), s2)
-
-                    pad_2_zero_labels = pad_2_zero_labels.unsqueeze(1).expand(-1, sample_num + 1, -1)
-                    pad_2_zero_labels = pad_2_zero_labels.reshape(bs * (sample_num + 1), -1)
-
-                    mp_long = mp_long.unsqueeze(1).expand(-1, sample_num + 1, -1)
-                    mp_long = mp_long.reshape(bs * (sample_num + 1), -1)
-                    mp = mp.unsqueeze(1).expand(-1, sample_num + 1, -1)
-                    mp = mp.reshape(bs * (sample_num + 1), -1)
-
-                    # non_mp_long = non_mp_long.unsqueeze(1).expand(-1, sample_num + 1, -1)
-                    # non_mp_long = non_mp_long.reshape(bs * (sample_num + 1), -1)
-                    # non_mp = non_mp.unsqueeze(1).expand(-1, sample_num + 1, -1)
-                    # non_mp = non_mp.reshape(bs * (sample_num + 1), -1)
-                    pads = pads.unsqueeze(1).expand(-1, sample_num + 1, -1)
-                    pads = pads.reshape(bs * (sample_num + 1), -1)
 
                 y_s = pad_2_zero_labels * (1 - mp_long) + masked_ids * mp_long
 
-                # print(y_s[:2])
-
                 y_zero_s = pads * (1 - mp_long) + masked_ids * mp_long
                 y_zero_labels = pads * (1 - mp_long) + pad_2_zero_labels * mp_long
-                # y_s_g = pad_2_zero_labels * (1 - mp_long) + masked_ids * mp_long
-                #
-                # y_s_g = y_s_g * (1 - non_mp_long) + masked_ids * non_mp_long
-                #
-                # y_s_g_m = y_s_g * (1 - mp_long) + torch.ones_like(masked_ids).long().cuda() * self.mask_id * mp_long
-                #
-                # y_s = labels.clone()
-                # y_s = torch.cat([torch.zeros(bs, 1, dtype=torch.long).cuda(), y_s], dim=-1)
-                # y_s.scatter_(1, masked_pos_shift, masked_ids)
-                # y_zero_s = torch.zeros_like(labels, dtype=torch.long).cuda()
-                # y_zero_s = torch.cat([torch.zeros(bs, 1, dtype=torch.long).cuda(), y_zero_s], dim=-1)
-                # y_zero_s.scatter_(1, masked_pos_shift, masked_ids)
-                # y_zero_labels = torch.zeros_like(labels, dtype=torch.long).cuda()
-                # y_zero_labels = torch.cat([torch.zeros(bs, 1, dtype=torch.long).cuda(), y_zero_labels], dim=-1)
-                # y_zero_labels.scatter_(1, masked_pos_shift, labels_masked)
 
                 if self.truth_log_probs:
                     truth_log_probs = log_probs.clone().gather(2, pad_2_zero_labels.unsqueeze(2)).squeeze()
                 else:
                     truth_log_probs = None
                 # print(log_probs.shape, masked_ids.shape)
-
                 if sample_num != 0 and self.config.sample_method == 'multi':
                     log_probs = log_probs * mp.float()
-                else:
-                    if self.config.use_all_probs:
-                        masked_probs = log_probs.gather(2, y_s.unsqueeze(2)).squeeze()
-                        mp_all = ~(labels.data.eq(-100))
-                        mp_all = mp_all.unsqueeze(1).expand(-1, sample_num + 1, -1)
-                        mp_all = mp_all.reshape(bs * (sample_num + 1), -1)
-                        log_probs = masked_probs * mp_all.float()
-                    else:
-                        if not self.do_rl:
-                            log_probs = torch.zeros_like(mp).cuda()
-                        else:
-                            # print(log_probs.shape)
-                            # print(masked_ids.shape)
-                            log_probs = log_probs * mp.float()
-                            # masked_probs = log_probs.gather(2, masked_ids.unsqueeze(2)).squeeze()
-
-                            # log_probs = masked_probs * mp.float()
-
 
             loss = None
             if labels is not None:
                 loss_fct = CrossEntropyLoss(ignore_index=-100)
-
                 loss = loss_fct(lm_logits.reshape(-1, lm_logits.size(-1)), labels.reshape(-1))
 
             if not return_dict:
@@ -1159,25 +815,14 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
                 encoder_last_hidden_state=encoder_outputs.last_hidden_state,
                 encoder_hidden_states=encoder_outputs.hidden_states,
                 encoder_attentions=encoder_outputs.attentions,
-                # y_b=y_b,
-                # y_s=y_s,
-                # max_ids=max_ids,
-                # masked_ids=masked_ids,
-                # input_ids=input_ids,
-                # labels=labels,
-                # non_zero_sum_tensor=non_zero_sum_tensor,
-                # log_probs=log_probs,
-                # y_zero_b=y_zero_b,
-                # y_zero_s=y_zero_s,
-                # y_zero_labels=y_zero_labels,
-                # truth_log_probs=truth_log_probs,
-                # log_probs_all=log_probs_all,
-                # lm_logits=lm_logits
-            ), y_b, y_s, max_ids, masked_ids, input_ids, labels, non_zero_sum_tensor, log_probs, y_zero_b, y_zero_s, y_zero_labels, truth_log_probs, log_probs_all, lm_logits, mask_labels, masked_pos_shift, masked_pos_non_shift, decoder_input_ids, None, None, None, None, predict_baseline
+            ), y_b, y_s, max_ids, masked_ids, input_ids, labels, \
+                non_zero_sum_tensor, log_probs, y_zero_b, y_zero_s, \
+                y_zero_labels, truth_log_probs, log_probs_all, lm_logits, \
+                mask_labels, masked_pos_shift, masked_pos_non_shift, \
+                decoder_input_ids, None, None, None, None, predict_baseline
 
 
         if lm_logits is not None and input_ids is not None and lm_logits.shape[0] != input_ids.shape[0]:
-            # print(lm_logits.shape)
             lm_logits = lm_logits.reshape(-1, 2, lm_logits.shape[-2], lm_logits.shape[-1])
             ce_lm_logits = lm_logits[:, 0, :]
             lm_logits = lm_logits[:, 1, :]
@@ -1186,7 +831,6 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
             labels = ce_labels[:, 1, :]
             ce_labels = ce_labels[:, 0, :]
 
-            # labels = labels.reshape(-1, 2, labels.shape[-1])
             masked_pos_shift = masked_pos_shift.reshape(-1, 2, masked_pos_shift.shape[-1])
             ce_masked_pos_shift = masked_pos_shift[:, 0, :]
             masked_pos_shift = masked_pos_shift[:, 1, :]
@@ -1205,704 +849,10 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
                                     masked_pos_non_shift=masked_pos_non_shift),
 
                    ]
-
-
         else:
             res = construct_return(lm_logits=lm_logits, labels=labels, bs=bs, non_masked_pos_shift=non_masked_pos_shift,
                                    masked_pos_shift=masked_pos_shift, masked_pos_non_shift=masked_pos_non_shift)
         return res
-
-    def rl_forward_no_mask(
-            self,
-            input_ids=None,
-            attention_mask=None,
-            decoder_input_ids=None,
-            decoder_attention_mask=None,
-            head_mask=None,
-            decoder_head_mask=None,
-            cross_attn_head_mask=None,
-            encoder_outputs=None,
-            past_key_values=None,
-            inputs_embeds=None,
-            decoder_inputs_embeds=None,
-            labels=None,
-            use_cache=None,
-            output_attentions=None,
-            output_hidden_states=None,
-            return_dict=None,
-            query=None,
-            doc=None,
-            q2=None,
-            rl_agent=None,
-    ):
-        r"""
-        labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size,)`, `optional`):
-            Labels for computing the sequence classification/regression loss. Indices should be in :obj:`[-100, 0, ...,
-            config.vocab_size - 1]`. All labels set to ``-100`` are ignored (masked), the loss is only computed for
-            labels in ``[0, ..., config.vocab_size]``
-        Returns:
-        Examples::
-            >>> from transformers import T5Tokenizer, T5ForConditionalGeneration
-
-            >>> tokenizer = T5Tokenizer.from_pretrained('t5-small')
-            >>> model = T5ForConditionalGeneration.from_pretrained('t5-small')
-
-            >>> # training
-            >>> input_ids = tokenizer('The <extra_id_0> walks in <extra_id_1> park', return_tensors='pt').input_ids
-            >>> labels = tokenizer('<extra_id_0> cute dog <extra_id_1> the <extra_id_2>', return_tensors='pt').input_ids
-            >>> outputs = model(input_ids=input_ids, labels=labels)
-            >>> loss = outputs.loss
-            >>> logits = outputs.logits
-
-            >>> # inference
-            >>> input_ids = tokenizer("summarize: studies have shown that owning a dog is good for you", return_tensors="pt").input_ids  # Batch size 1
-            >>> outputs = model.generate(input_ids)
-            >>> print(tokenizer.decode(outputs[0], skip_special_tokens=True))
-            >>> # studies have shown that owning a dog is good for you.
-        """
-        use_cache = use_cache if use_cache is not None else self.config.use_cache
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
-        # FutureWarning: head_mask was separated into two input args - head_mask, decoder_head_mask
-        if head_mask is not None and decoder_head_mask is None:
-            if self.config.num_layers == self.config.num_decoder_layers:
-                warnings.warn(__HEAD_MASK_WARNING_MSG, FutureWarning)
-                decoder_head_mask = head_mask
-
-        # Encode if needed (training, first prediction pass)
-        if encoder_outputs is None:
-            # Convert encoder inputs in embeddings if needed
-            encoder_outputs = self.encoder(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                inputs_embeds=inputs_embeds,
-                head_mask=head_mask,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
-                return_dict=return_dict,
-            )
-        elif return_dict and not isinstance(encoder_outputs, BaseModelOutput):
-            encoder_outputs = BaseModelOutput(
-                last_hidden_state=encoder_outputs[0],
-                hidden_states=encoder_outputs[1] if len(encoder_outputs) > 1 else None,
-                attentions=encoder_outputs[2] if len(encoder_outputs) > 2 else None,
-            )
-        hidden_states = encoder_outputs[0]
-        if self.model_parallel:
-            torch.cuda.set_device(self.decoder.first_device)
-        mask_decoder_inputs = True
-        masked_pos_non_shift = None
-        if labels is not None and decoder_input_ids is None and decoder_inputs_embeds is None:
-            if mask_decoder_inputs:
-                bs = labels.shape[0]
-                mask_labels = labels.clone()  # bs, seq
-                masked_pos_shift = torch.zeros_like(mask_labels)  # bs, seq
-                masked_pos_non_shift = torch.zeros_like(mask_labels)  # bs, seq
-                non_zero_labels = ~(
-                            labels.data.eq(0) | labels.data.eq(1) | labels.data.eq(-100))  # 0 pad 1 <\s> -100 pad
-                # 1 eos 0 pad -100 ce pad
-                non_zero_sum_tensor = non_zero_labels.sum(-1)  # bs
-                non_zero_sum = non_zero_sum_tensor.detach().cpu().numpy().tolist()
-                labels_numpy = mask_labels.detach().cpu().numpy().tolist()
-                for i in range(bs):
-                    label_np = labels_numpy[i]
-                    cand_pos = []
-                    k = 0
-                    while k < non_zero_sum[i] - self.tail_unmask_num:
-                        if self.config.cand_pos_remove_sp_tk:
-                            if label_np[k] == 250100 or label_np[k] == 250101:
-                                k += 1
-                                continue
-                        cand_pos.append(k)
-                        k += 1
-                    sample_num = int(len(cand_pos) * self.mask_rate)
-                    sample_pos = np_rand.choice(a=np.array(cand_pos), size=sample_num, replace=False).tolist()
-                    sample_pos = sorted(sample_pos)
-
-                    for idx, j in enumerate(sample_pos):
-                        masked_pos_shift[i][idx] = j + 1
-                        masked_pos_non_shift[i][idx] = j
-                decoder_input_ids = self._shift_right(mask_labels)  # 0, 1, 2  pred 1, 2,
-                # print(decoder_input_ids)
-            else:
-                decoder_input_ids = self._shift_right(labels)
-
-
-
-        if self.model_parallel:
-            torch.cuda.set_device(self.decoder.first_device)
-            hidden_states = hidden_states.to(self.decoder.first_device)
-            if decoder_input_ids is not None:
-                decoder_input_ids = decoder_input_ids.to(self.decoder.first_device)
-            if attention_mask is not None:
-                attention_mask = attention_mask.to(self.decoder.first_device)
-            if decoder_attention_mask is not None:
-                decoder_attention_mask = decoder_attention_mask.to(self.decoder.first_device)
-        # Decode
-        decoder_outputs = self.decoder(
-            input_ids=decoder_input_ids,
-            attention_mask=decoder_attention_mask,
-            inputs_embeds=decoder_inputs_embeds,
-            past_key_values=past_key_values,
-            encoder_hidden_states=hidden_states,
-            encoder_attention_mask=attention_mask,
-            head_mask=decoder_head_mask,
-            cross_attn_head_mask=cross_attn_head_mask,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
-
-        sequence_output = decoder_outputs[0]
-
-        # Set device for model parallelism
-        if self.model_parallel:
-            torch.cuda.set_device(self.encoder.first_device)
-            self.lm_head = self.lm_head.to(self.encoder.first_device)
-            sequence_output = sequence_output.to(self.lm_head.weight.device)
-
-        if self.config.tie_word_embeddings:
-            # Rescale output before projecting on vocab
-            # See https://github.com/tensorflow/mesh/blob/fa19d69eafc9a482aff0b59ddd96b025c0cb207d/mesh_tensorflow/transformer/transformer.py#L586
-            sequence_output = sequence_output * (self.model_dim ** -0.5)
-
-        def gather_seq_out_by_pos(seq, pos):
-            return torch.gather(seq, 1, pos.unsqueeze(2).expand(-1, -1, seq.size(-1)))
-
-        lm_logits = self.lm_head(sequence_output)  # bs, seq_len,
-        if mask_decoder_inputs and masked_pos_non_shift is not None:
-            probs = torch.softmax(lm_logits, dim=-1)
-            log_probs = torch.log(probs+ 1e-8)
-            seq_len = labels.shape[1]
-            mp = torch.zeros((bs, seq_len+1)).cuda().scatter_(1, masked_pos_shift, torch.ones((bs, seq_len+1)).cuda())
-            mp = mp[:, 1:]
-            mp_long = mp.long()
-            pad_2_zero_labels = labels * ~(labels.data.eq(-100) | labels.data.eq(1))  # -100 -> 0#
-
-            # lm_logits_masked = gather_seq_out_by_pos(
-            #     lm_logits, masked_pos_non_shift)
-            # labels_masked = gather_seq_out_by_pos(
-            #     labels.unsqueeze(-1), masked_pos_non_shift)  # mask_pos_tokens + 0 position tokens
-            #
-            # labels_masked = labels_masked.squeeze(-1)
-            # probs = torch.softmax(lm_logits_masked,
-            #                       dim=-1)  # start 输出0 0的位置输出的是1， 如果没有shift的话，add的时候0的位置的输出的max_id是加到位置1上，如果shift了
-            # log_probs = torch.log(probs + 1e-8)
-            # _, max_ids = torch.max(log_probs, dim=-1)  # mask_pos + 0 position tokens
-            zeros = torch.zeros_like(labels, dtype=torch.long).cuda()
-            _, max_ids = torch.max(log_probs, dim=-1)
-            # y_b = labels.clone()
-            # y_b = torch.cat([torch.zeros(bs, 1, dtype=torch.long).cuda(), y_b], dim=-1)
-            # y_b.scatter_(1, masked_pos_shift, max_ids)
-
-            y_b = pad_2_zero_labels * (1-mp_long) + max_ids * mp_long
-            y_zero_b = zeros * (1-mp_long) + max_ids * mp_long
-
-            # y_zero_b = torch.zeros_like(labels, dtype=torch.long).cuda()
-            # y_zero_b = torch.cat([torch.zeros(bs, 1, dtype=torch.long).cuda(), y_zero_b], dim=-1)
-            # y_zero_b.scatter_(1, masked_pos_shift, max_ids)
-            multi_dist = Categorical(probs)
-            masked_ids = multi_dist.sample()
-            y_s = pad_2_zero_labels * (1 - mp_long) + masked_ids * mp_long
-            y_zero_s = zeros * (1 - mp_long) + masked_ids * mp_long
-            y_zero_labels = zeros * (1 - mp_long) + pad_2_zero_labels * mp_long
-
-
-            if self.truth_log_probs:
-                truth_log_probs = log_probs.clone().gather(2, pad_2_zero_labels.unsqueeze(2)).squeeze()
-            else:
-                truth_log_probs = None
-            masked_probs = log_probs.gather(2, masked_ids.unsqueeze(2)).squeeze()
-            log_probs_all = log_probs.clone()
-            log_probs = masked_probs * mp.float()
-
-        loss = None
-        if labels is not None:
-            loss_fct = CrossEntropyLoss(ignore_index=-100)
-            loss = loss_fct(lm_logits.view(-1, lm_logits.size(-1)), labels.view(-1))
-            # TODO(thom): Add z_loss https://github.com/tensorflow/mesh/blob/fa19d69eafc9a482aff0b59ddd96b025c0cb207d/mesh_tensorflow/layers.py#L666
-
-        if not return_dict:
-            output = (lm_logits,) + decoder_outputs[1:] + encoder_outputs
-            return ((loss,) + output) if loss is not None else output
-        if labels is None:
-            return Seq2SeqLMOutput(
-                loss=loss,
-                logits=lm_logits,
-                past_key_values=decoder_outputs.past_key_values,
-                decoder_hidden_states=decoder_outputs.hidden_states,
-                decoder_attentions=decoder_outputs.attentions,
-                cross_attentions=decoder_outputs.cross_attentions,
-                encoder_last_hidden_state=encoder_outputs.last_hidden_state,
-                encoder_hidden_states=encoder_outputs.hidden_states,
-                encoder_attentions=encoder_outputs.attentions,
-            )
-
-        return Seq2SeqLMOutput(
-            loss=loss,
-            logits=lm_logits,
-            past_key_values=decoder_outputs.past_key_values,
-            decoder_hidden_states=decoder_outputs.hidden_states,
-            decoder_attentions=decoder_outputs.attentions,
-            cross_attentions=decoder_outputs.cross_attentions,
-            encoder_last_hidden_state=encoder_outputs.last_hidden_state,
-            encoder_hidden_states=encoder_outputs.hidden_states,
-            encoder_attentions=encoder_outputs.attentions,
-            # y_b=y_b,
-            # y_s=y_s,
-            # max_ids=max_ids,
-            # masked_ids=masked_ids,
-            # input_ids=input_ids,
-            # labels=labels,
-            # non_zero_sum_tensor=non_zero_sum_tensor,
-            # log_probs=log_probs,
-            # y_zero_b=y_zero_b,
-            # y_zero_s=y_zero_s,
-            # y_zero_labels=y_zero_labels,
-            # truth_log_probs=truth_log_probs,
-            # log_probs_all=log_probs_all,
-            # lm_logits=lm_logits
-        ), y_b, y_s, max_ids, masked_ids, input_ids, labels, non_zero_sum_tensor, log_probs, y_zero_b, y_zero_s, y_zero_labels, truth_log_probs, log_probs_all, lm_logits
-
-    def rl_forward_second(
-            self,
-            input_ids=None,
-            attention_mask=None,
-            decoder_input_ids=None,
-            decoder_attention_mask=None,
-            head_mask=None,
-            decoder_head_mask=None,
-            cross_attn_head_mask=None,
-            encoder_outputs=None,
-            past_key_values=None,
-            inputs_embeds=None,
-            decoder_inputs_embeds=None,
-            labels=None,
-            use_cache=None,
-            output_attentions=None,
-            output_hidden_states=None,
-            return_dict=None,
-            query=None,
-            doc=None,
-            q2=None,
-            rl_agent=None,
-            mask_labels=None,
-            masked_pos_shift=None,
-            masked_pos_non_shift=None,
-            ori_labels=None,
-    ):
-        r"""
-        labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size,)`, `optional`):
-            Labels for computing the sequence classification/regression loss. Indices should be in :obj:`[-100, 0, ...,
-            config.vocab_size - 1]`. All labels set to ``-100`` are ignored (masked), the loss is only computed for
-            labels in ``[0, ..., config.vocab_size]``
-        Returns:
-        Examples::
-            >>> from transformers import T5Tokenizer, T5ForConditionalGeneration
-
-            >>> tokenizer = T5Tokenizer.from_pretrained('t5-small')
-            >>> model = T5ForConditionalGeneration.from_pretrained('t5-small')
-
-            >>> # training
-            >>> input_ids = tokenizer('The <extra_id_0> walks in <extra_id_1> park', return_tensors='pt').input_ids
-            >>> labels = tokenizer('<extra_id_0> cute dog <extra_id_1> the <extra_id_2>', return_tensors='pt').input_ids
-            >>> outputs = model(input_ids=input_ids, labels=labels)
-            >>> loss = outputs.loss
-            >>> logits = outputs.logits
-
-            >>> # inference
-            >>> input_ids = tokenizer("summarize: studies have shown that owning a dog is good for you", return_tensors="pt").input_ids  # Batch size 1
-            >>> outputs = model.generate(input_ids)
-            >>> print(tokenizer.decode(outputs[0], skip_special_tokens=True))
-            >>> # studies have shown that owning a dog is good for you.
-        """
-        use_cache = use_cache if use_cache is not None else self.config.use_cache
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
-        # FutureWarning: head_mask was separated into two input args - head_mask, decoder_head_mask
-        if head_mask is not None and decoder_head_mask is None:
-            if self.config.num_layers == self.config.num_decoder_layers:
-                warnings.warn(__HEAD_MASK_WARNING_MSG, FutureWarning)
-                decoder_head_mask = head_mask
-
-        # Encode if needed (training, first prediction pass)
-        if encoder_outputs is None:
-            # Convert encoder inputs in embeddings if needed
-            encoder_outputs = self.encoder(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                inputs_embeds=inputs_embeds,
-                head_mask=head_mask,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
-                return_dict=return_dict,
-            )
-        elif return_dict and not isinstance(encoder_outputs, BaseModelOutput):
-            encoder_outputs = BaseModelOutput(
-                last_hidden_state=encoder_outputs[0],
-                hidden_states=encoder_outputs[1] if len(encoder_outputs) > 1 else None,
-                attentions=encoder_outputs[2] if len(encoder_outputs) > 2 else None,
-            )
-        hidden_states = encoder_outputs[0]
-        if self.model_parallel:
-            torch.cuda.set_device(self.decoder.first_device)
-        mask_decoder_inputs = True
-        masked_pos_non_shift = None
-        if labels is not None and decoder_input_ids is None and decoder_inputs_embeds is None:
-            if mask_decoder_inputs:
-                bs = labels.shape[0]
-                mask_labels = labels.clone()  # bs, seq
-                if masked_pos_shift is None:
-                    masked_pos_shift = torch.zeros_like(mask_labels)  # bs, seq
-                    masked_pos_non_shift = torch.zeros_like(mask_labels)  # bs, seq
-                    non_zero_labels = ~(
-                                labels.data.eq(0) | labels.data.eq(1) | labels.data.eq(-100))  # 0 pad 1 <\s> -100 pad
-                    # 1 eos 0 pad -100 ce pad
-                    non_zero_sum_tensor = non_zero_labels.sum(-1)  # bs
-                    non_zero_sum = non_zero_sum_tensor.detach().cpu().numpy().tolist()
-                    labels_numpy = mask_labels.detach().cpu().numpy().tolist()
-                    for i in range(bs):
-                        label_np = labels_numpy[i]
-                        cand_pos = []
-                        k = 0
-                        while k < non_zero_sum[i] - self.tail_unmask_num:
-                            if self.config.cand_pos_remove_sp_tk:
-                                if label_np[k] == 250100 or label_np[k] == 250101:
-                                    k += 1
-                                    continue
-                            cand_pos.append(k)
-                            k += 1
-                        for idx, j in enumerate(cand_pos):
-                            masked_pos_shift[i][idx] = j + 1
-                            masked_pos_non_shift[i][idx] = j
-                decoder_input_ids = self._shift_right(mask_labels)  # 0, 1, 2  pred 1, 2,
-                # print(decoder_input_ids)
-            else:
-                decoder_input_ids = self._shift_right(labels)
-
-
-
-        if self.model_parallel:
-            torch.cuda.set_device(self.decoder.first_device)
-            hidden_states = hidden_states.to(self.decoder.first_device)
-            if decoder_input_ids is not None:
-                decoder_input_ids = decoder_input_ids.to(self.decoder.first_device)
-            if attention_mask is not None:
-                attention_mask = attention_mask.to(self.decoder.first_device)
-            if decoder_attention_mask is not None:
-                decoder_attention_mask = decoder_attention_mask.to(self.decoder.first_device)
-        # Decode
-        decoder_outputs = self.decoder(
-            input_ids=decoder_input_ids,
-            attention_mask=decoder_attention_mask,
-            inputs_embeds=decoder_inputs_embeds,
-            past_key_values=past_key_values,
-            encoder_hidden_states=hidden_states,
-            encoder_attention_mask=attention_mask,
-            head_mask=decoder_head_mask,
-            cross_attn_head_mask=cross_attn_head_mask,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
-
-        sequence_output = decoder_outputs[0]
-
-        # Set device for model parallelism
-        if self.model_parallel:
-            torch.cuda.set_device(self.encoder.first_device)
-            self.lm_head = self.lm_head.to(self.encoder.first_device)
-            sequence_output = sequence_output.to(self.lm_head.weight.device)
-
-        if self.config.tie_word_embeddings:
-            # Rescale output before projecting on vocab
-            # See https://github.com/tensorflow/mesh/blob/fa19d69eafc9a482aff0b59ddd96b025c0cb207d/mesh_tensorflow/transformer/transformer.py#L586
-            sequence_output = sequence_output * (self.model_dim ** -0.5)
-
-        def gather_seq_out_by_pos(seq, pos):
-            return torch.gather(seq, 1, pos.unsqueeze(2).expand(-1, -1, seq.size(-1)))
-
-        lm_logits = self.lm_head(sequence_output)  # bs, seq_len,
-
-        probs = torch.softmax(lm_logits, dim=-1)
-        log_probs = torch.log(probs+ 1e-8)
-        seq_len = labels.shape[1]
-        mp = torch.zeros((bs, seq_len+1)).cuda().scatter_(1, masked_pos_shift, torch.ones((bs, seq_len+1)).cuda())
-        mp = mp[:, 1:]
-        pad_2_zero_labels = labels * ~(labels.data.eq(-100) | labels.data.eq(1))  # -100 -> 0#
-
-        masked_probs = log_probs.gather(2, pad_2_zero_labels.unsqueeze(2)).squeeze()
-        log_probs = masked_probs * mp.float()
-
-        loss = None
-        if ori_labels is not None:
-            loss_fct = CrossEntropyLoss(ignore_index=-100)
-            loss = loss_fct(lm_logits.view(-1, lm_logits.size(-1)), ori_labels.view(-1))
-            # TODO(thom): Add z_loss https://github.com/tensorflow/mesh/blob/fa19d69eafc9a482aff0b59ddd96b025c0cb207d/mesh_tensorflow/layers.py#L666
-
-        if not return_dict:
-            output = (lm_logits,) + decoder_outputs[1:] + encoder_outputs
-            return ((loss,) + output) if loss is not None else output
-        if labels is None:
-            return Seq2SeqLMOutput(
-                loss=loss,
-                logits=lm_logits,
-                past_key_values=decoder_outputs.past_key_values,
-                decoder_hidden_states=decoder_outputs.hidden_states,
-                decoder_attentions=decoder_outputs.attentions,
-                cross_attentions=decoder_outputs.cross_attentions,
-                encoder_last_hidden_state=encoder_outputs.last_hidden_state,
-                encoder_hidden_states=encoder_outputs.hidden_states,
-                encoder_attentions=encoder_outputs.attentions,
-            )
-
-        return Seq2SeqLMOutput(
-            loss=loss,
-            logits=lm_logits,
-            past_key_values=decoder_outputs.past_key_values,
-            decoder_hidden_states=decoder_outputs.hidden_states,
-            decoder_attentions=decoder_outputs.attentions,
-            cross_attentions=decoder_outputs.cross_attentions,
-            encoder_last_hidden_state=encoder_outputs.last_hidden_state,
-            encoder_hidden_states=encoder_outputs.hidden_states,
-            encoder_attentions=encoder_outputs.attentions,
-        ), log_probs
-
-
-    def rl_forward_second_s(
-            self,
-            input_ids=None,
-            attention_mask=None,
-            decoder_input_ids=None,
-            decoder_attention_mask=None,
-            head_mask=None,
-            decoder_head_mask=None,
-            cross_attn_head_mask=None,
-            encoder_outputs=None,
-            past_key_values=None,
-            inputs_embeds=None,
-            decoder_inputs_embeds=None,
-            labels=None,
-            use_cache=None,
-            output_attentions=None,
-            output_hidden_states=None,
-            return_dict=None,
-            query=None,
-            doc=None,
-            q2=None,
-            rl_agent=None,
-            mask_labels=None,
-            masked_pos_shift=None,
-            masked_pos_non_shift=None,
-            ori_labels=None,
-    ):
-        r"""
-        labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size,)`, `optional`):
-            Labels for computing the sequence classification/regression loss. Indices should be in :obj:`[-100, 0, ...,
-            config.vocab_size - 1]`. All labels set to ``-100`` are ignored (masked), the loss is only computed for
-            labels in ``[0, ..., config.vocab_size]``
-        Returns:
-        Examples::
-            >>> from transformers import T5Tokenizer, T5ForConditionalGeneration
-
-            >>> tokenizer = T5Tokenizer.from_pretrained('t5-small')
-            >>> model = T5ForConditionalGeneration.from_pretrained('t5-small')
-
-            >>> # training
-            >>> input_ids = tokenizer('The <extra_id_0> walks in <extra_id_1> park', return_tensors='pt').input_ids
-            >>> labels = tokenizer('<extra_id_0> cute dog <extra_id_1> the <extra_id_2>', return_tensors='pt').input_ids
-            >>> outputs = model(input_ids=input_ids, labels=labels)
-            >>> loss = outputs.loss
-            >>> logits = outputs.logits
-
-            >>> # inference
-            >>> input_ids = tokenizer("summarize: studies have shown that owning a dog is good for you", return_tensors="pt").input_ids  # Batch size 1
-            >>> outputs = model.generate(input_ids)
-            >>> print(tokenizer.decode(outputs[0], skip_special_tokens=True))
-            >>> # studies have shown that owning a dog is good for you.
-        """
-        use_cache = use_cache if use_cache is not None else self.config.use_cache
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
-        # FutureWarning: head_mask was separated into two input args - head_mask, decoder_head_mask
-        if head_mask is not None and decoder_head_mask is None:
-            if self.config.num_layers == self.config.num_decoder_layers:
-                warnings.warn(__HEAD_MASK_WARNING_MSG, FutureWarning)
-                decoder_head_mask = head_mask
-
-        # Encode if needed (training, first prediction pass)
-        if encoder_outputs is None:
-            # Convert encoder inputs in embeddings if needed
-            encoder_outputs = self.encoder(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                inputs_embeds=inputs_embeds,
-                head_mask=head_mask,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
-                return_dict=return_dict,
-            )
-        elif return_dict and not isinstance(encoder_outputs, BaseModelOutput):
-            encoder_outputs = BaseModelOutput(
-                last_hidden_state=encoder_outputs[0],
-                hidden_states=encoder_outputs[1] if len(encoder_outputs) > 1 else None,
-                attentions=encoder_outputs[2] if len(encoder_outputs) > 2 else None,
-            )
-        hidden_states = encoder_outputs[0]
-        if self.model_parallel:
-            torch.cuda.set_device(self.decoder.first_device)
-        mask_decoder_inputs = True
-        masked_pos_non_shift = None
-        if labels is not None and decoder_input_ids is None and decoder_inputs_embeds is None:
-            if mask_decoder_inputs:
-                bs = labels.shape[0]
-                mask_labels = labels.clone()  # bs, seq
-                non_zero_labels = ~(
-                        labels.data.eq(0) | labels.data.eq(1) | labels.data.eq(-100))  # 0 pad 1 <\s> -100 pad
-                # 1 eos 0 pad -100 ce pad
-                non_zero_sum_tensor = non_zero_labels.sum(-1)  # bs
-                if masked_pos_shift is None:
-                    masked_pos_shift = torch.zeros_like(mask_labels)  # bs, seq
-                    masked_pos_non_shift = torch.zeros_like(mask_labels)  # bs, seq
-                    non_zero_sum = non_zero_sum_tensor.detach().cpu().numpy().tolist()
-                    labels_numpy = mask_labels.detach().cpu().numpy().tolist()
-                    for i in range(bs):
-                        label_np = labels_numpy[i]
-                        cand_pos = []
-                        k = 0
-                        while k < non_zero_sum[i] - self.tail_unmask_num:
-                            if self.config.cand_pos_remove_sp_tk:
-                                if label_np[k] == 250100 or label_np[k] == 250101:
-                                    k += 1
-                                    continue
-                            cand_pos.append(k)
-                            k += 1
-                        for idx, j in enumerate(cand_pos):
-                            masked_pos_shift[i][idx] = j + 1
-                            masked_pos_non_shift[i][idx] = j
-                decoder_input_ids = self._shift_right(mask_labels)  # 0, 1, 2  pred 1, 2,
-                    # print(decoder_input_ids)
-            else:
-                decoder_input_ids = self._shift_right(labels)
-
-        if self.model_parallel:
-            torch.cuda.set_device(self.decoder.first_device)
-            hidden_states = hidden_states.to(self.decoder.first_device)
-            if decoder_input_ids is not None:
-                decoder_input_ids = decoder_input_ids.to(self.decoder.first_device)
-            if attention_mask is not None:
-                attention_mask = attention_mask.to(self.decoder.first_device)
-            if decoder_attention_mask is not None:
-                decoder_attention_mask = decoder_attention_mask.to(self.decoder.first_device)
-        # Decode
-        decoder_outputs = self.decoder(
-            input_ids=decoder_input_ids,
-            attention_mask=decoder_attention_mask,
-            inputs_embeds=decoder_inputs_embeds,
-            past_key_values=past_key_values,
-            encoder_hidden_states=hidden_states,
-            encoder_attention_mask=attention_mask,
-            head_mask=decoder_head_mask,
-            cross_attn_head_mask=cross_attn_head_mask,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
-
-        sequence_output = decoder_outputs[0]
-
-        # Set device for model parallelism
-        if self.model_parallel:
-            torch.cuda.set_device(self.encoder.first_device)
-            self.lm_head = self.lm_head.to(self.encoder.first_device)
-            sequence_output = sequence_output.to(self.lm_head.weight.device)
-
-        if self.config.tie_word_embeddings:
-            # Rescale output before projecting on vocab
-            # See https://github.com/tensorflow/mesh/blob/fa19d69eafc9a482aff0b59ddd96b025c0cb207d/mesh_tensorflow/transformer/transformer.py#L586
-            sequence_output = sequence_output * (self.model_dim ** -0.5)
-
-        def gather_seq_out_by_pos(seq, pos):
-            return torch.gather(seq, 1, pos.unsqueeze(2).expand(-1, -1, seq.size(-1)))
-
-        lm_logits = self.lm_head(sequence_output)  # bs, seq_len,
-        # probs = torch.softmax(lm_logits, dim=-1)
-        # log_probs = torch.log(probs+ 1e-8)
-        # seq_len = labels.shape[1]
-        # mp = torch.zeros((bs, seq_len+1)).cuda().scatter_(1, masked_pos_shift, torch.ones((bs, seq_len+1)).cuda())
-        # mp = mp[:, 1:]
-        # pad_2_zero_labels = labels * ~(labels.data.eq(-100) | labels.data.eq(1))  # -100 -> 0#
-        #
-        # masked_probs = log_probs.gather(2, pad_2_zero_labels.unsqueeze(2)).squeeze()
-        # log_probs = masked_probs * mp.float()
-        topk = self.config.sample_topk
-        if topk == -1:
-            to_sample_lm_logits = lm_logits
-        else:
-            indices_to_remove = lm_logits < torch.topk(lm_logits, topk)[0][..., -1, None]
-            indices_to_keep = lm_logits >= torch.topk(lm_logits, topk)[0][..., -1, None]
-            # print(indices_to_remove.shape)
-            # print(probs.shape)
-            to_sample_lm_logits = lm_logits * indices_to_keep.cuda() + indices_to_remove.cuda() * torch.ones_like(
-                lm_logits).cuda() * -1e8
-        to_sample_probs = torch.softmax(to_sample_lm_logits, dim=-1)
-        probs = torch.softmax(lm_logits, dim=-1)
-
-        '''
-        topk
-        '''
-        log_probs = torch.log(probs + 1e-8)
-        seq_len = labels.shape[1]
-        mp = torch.zeros((bs, seq_len + 1)).cuda().scatter_(1, masked_pos_shift, torch.ones((bs, seq_len + 1)).cuda())
-        mp = mp[:, 1:]
-        mp_long = mp.long()
-        pad_2_zero_labels = labels * ~(labels.data.eq(-100) | labels.data.eq(1))  # -100 -> 0#
-
-        zeros = torch.zeros_like(labels, dtype=torch.long).cuda()
-        pads = zeros.clone()
-        _, max_ids = torch.max(log_probs, dim=-1)
-
-        y_b = pad_2_zero_labels * (1 - mp_long) + max_ids * mp_long
-        y_zero_b = pads * (1 - mp_long) + max_ids * mp_long
-
-        multi_dist = Categorical(to_sample_probs)
-        masked_ids = multi_dist.sample()
-        y_s = pad_2_zero_labels * (1 - mp_long) + masked_ids * mp_long
-        y_zero_s = pads * (1 - mp_long) + masked_ids * mp_long
-        y_zero_labels = pads * (1 - mp_long) + pad_2_zero_labels * mp_long
-
-        if self.truth_log_probs:
-            truth_log_probs = log_probs.clone().gather(2, pad_2_zero_labels.unsqueeze(2)).squeeze()
-        else:
-            truth_log_probs = None
-        masked_probs = log_probs.gather(2, masked_ids.unsqueeze(2)).squeeze()
-        log_probs_all = log_probs.clone()
-        log_probs = masked_probs * mp.float()
-
-        loss = None
-        if ori_labels is not None:
-            loss_fct = CrossEntropyLoss(ignore_index=-100)
-            loss = loss_fct(lm_logits.view(-1, lm_logits.size(-1)), ori_labels.view(-1))
-            # TODO(thom): Add z_loss https://github.com/tensorflow/mesh/blob/fa19d69eafc9a482aff0b59ddd96b025c0cb207d/mesh_tensorflow/layers.py#L666
-
-        if not return_dict:
-            output = (lm_logits,) + decoder_outputs[1:] + encoder_outputs
-            return ((loss,) + output) if loss is not None else output
-
-        return Seq2SeqLMOutput(
-            loss=loss,
-            logits=lm_logits,
-            past_key_values=decoder_outputs.past_key_values,
-            decoder_hidden_states=decoder_outputs.hidden_states,
-            decoder_attentions=decoder_outputs.attentions,
-            cross_attentions=decoder_outputs.cross_attentions,
-            encoder_last_hidden_state=encoder_outputs.last_hidden_state,
-            encoder_hidden_states=encoder_outputs.hidden_states,
-            encoder_attentions=encoder_outputs.attentions,
-        ), y_b, y_s, max_ids, masked_ids, input_ids, labels, non_zero_sum_tensor, log_probs, y_zero_b, y_zero_s, y_zero_labels, truth_log_probs, log_probs_all, lm_logits, mask_labels, masked_pos_shift, masked_pos_non_shift
 
 
     def forward(self, **kwargs):
@@ -1947,55 +897,6 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
             if 'not_seq_decode' in kwargs:
                 kwargs.pop('not_seq_decode')
             return self.normal_forward(**kwargs)
-        elif 'normal_forward_v' in kwargs:
-            kwargs.pop('normal_forward_v')
-            if 'doc' in kwargs:
-                kwargs.pop('doc') #todo
-            if 'query' in kwargs:
-                kwargs.pop('query') #todo
-            if 'q2' in kwargs:
-                kwargs.pop('q2')
-            if 'labels' in kwargs:
-                kwargs.pop('labels')
-            if 'not_seq_decode' in kwargs:
-                kwargs.pop('not_seq_decode')
-            return self.normal_forward_v(**kwargs)
-        elif 'normal_forward_no_mask' in kwargs:
-            kwargs.pop('normal_forward_no_mask')
-            if 'doc' in kwargs:
-                kwargs.pop('doc')  # todo
-            if 'query' in kwargs:
-                kwargs.pop('query')  # todo
-            if 'q2' in kwargs:
-                kwargs.pop('q2')
-            if 'not_seq_decode' in kwargs:
-                kwargs.pop('not_seq_decode')
-            # return super().forward(**kwargs)
-            return self.rl_forward_no_mask(**kwargs)
-        elif 'normal_forward_second' in kwargs:
-            kwargs.pop('normal_forward_second')
-            if 'doc' in kwargs:
-                kwargs.pop('doc')  # todo
-            if 'query' in kwargs:
-                kwargs.pop('query')  # todo
-            if 'q2' in kwargs:
-                kwargs.pop('q2')
-            if 'not_seq_decode' in kwargs:
-                kwargs.pop('not_seq_decode')
-            # return super().forward(**kwargs)
-            return self.rl_forward_second(**kwargs)
-        elif 'rl_forward_second_s' in kwargs:
-            kwargs.pop('rl_forward_second_s')
-            if 'doc' in kwargs:
-                kwargs.pop('doc')  # todo
-            if 'query' in kwargs:
-                kwargs.pop('query')  # todo
-            if 'q2' in kwargs:
-                kwargs.pop('q2')
-            if 'not_seq_decode' in kwargs:
-                kwargs.pop('not_seq_decode')
-            # return super().forward(**kwargs)
-            return self.rl_forward_second_s(**kwargs)
         else:
             if 'doc' in kwargs:
                 kwargs.pop('doc') #todo
