@@ -343,7 +343,7 @@ class Trainer(Trainer):
         if process:
             traces = [process(e) for e in traces]
         return traces
-
+    # todo remove truth_log_probs
     def rl_ids_2_str(self, y_b, y_s, max_ids, masked_ids, input_ids,
                      labels, non_zero_sum_tensor, log_probs, querys,
                          tokenizer, y_zero_b, y_zero_s, y_zero_labels,
@@ -516,28 +516,15 @@ class Trainer(Trainer):
             kwargs:
                 Additional keyword arguments used to hide deprecated arguments
         """
-
-        # from transformers import BartTokenizer, BartForConditionalGeneration
-        # self.model.tmp_model = BartForConditionalGeneration.from_pretrained('lmqg/bart-large-squad')
-        # x = [[0, 50265, 12674, 1755, 1437, 50265, 617, 4939, 69, 3501, 756, 6, 8996, 25, 15629, 3250, 381, 16597, 957, 11, 5, 2266, 4388, 4003, 18137, 6, 23906, 10023, 4, 2]]
-        # q = self.model.tmp_model.generate(torch.tensor(x))
-        # print(q)
-        # assert 1==0
-
         resume_from_checkpoint = None if not resume_from_checkpoint else resume_from_checkpoint
-
         # memory metrics - must set up as early as possible
         self._memory_tracker.start()
-
         args = self.args
-
         self.is_in_train = True
-
         # do_train is not a reliable argument, as it might not be set and .train() still called, so
         # the following is a workaround:
         if args.fp16_full_eval and not args.do_train:
             self._move_model_to_device(self.model, args.device)
-
         if "model_path" in kwargs:
             resume_from_checkpoint = kwargs.pop("model_path")
             warnings.warn(
@@ -568,9 +555,7 @@ class Trainer(Trainer):
         if resume_from_checkpoint is not None:
             if not os.path.isfile(os.path.join(resume_from_checkpoint, WEIGHTS_NAME)):
                 raise ValueError(f"Can't find a valid checkpoint at {resume_from_checkpoint}")
-
             logger.info(f"Loading model from {resume_from_checkpoint}).")
-
             if os.path.isfile(os.path.join(resume_from_checkpoint, CONFIG_NAME)):
                 config = PretrainedConfig.from_json_file(os.path.join(resume_from_checkpoint, CONFIG_NAME))
                 checkpoint_version = config.transformers_version
@@ -580,7 +565,6 @@ class Trainer(Trainer):
                         f"Transformers but your current version is {__version__}. This is not recommended and could "
                         "yield to errors or unwanted behaviors."
                     )
-
             if args.deepspeed:
                 # will be resumed in deepspeed_init
                 pass
@@ -589,7 +573,6 @@ class Trainer(Trainer):
                 state_dict = torch.load(os.path.join(resume_from_checkpoint, WEIGHTS_NAME), map_location="cpu")
                 # If the model is on the GPU, it still works!
                 self._load_state_dict_in_model(state_dict)
-
                 # release memory
                 del state_dict
 
@@ -765,7 +748,6 @@ class Trainer(Trainer):
                     break
         all_b_rewards = []
         all_ce_loss = []
-        all_file = []
         for epoch in range(epochs_trained, num_train_epochs):
             if isinstance(train_dataloader, DataLoader) and isinstance(train_dataloader.sampler, DistributedSampler):
                 train_dataloader.sampler.set_epoch(epoch)
@@ -818,7 +800,7 @@ class Trainer(Trainer):
             self.reward_dist_dict = {}
             his_d_rl_weight = []
             his_d_rl_weight_l = []
-            epoch_ce_loss = []
+            self.epoch_ce_loss = []
             for step, inputs in enumerate(epoch_iterator):
                 rep_num = 1
                 ori_inputs = copy.deepcopy(inputs)
@@ -846,7 +828,6 @@ class Trainer(Trainer):
                         with model.no_sync():
                             tr_loss_step, ce_loss, b_reward = self.training_step(model, inputs)
                     else:
-
                         tr_loss_step, ce_loss, b_reward = self.training_step(model, inputs)
 
                         for name, value in b_reward.items():
@@ -861,7 +842,7 @@ class Trainer(Trainer):
 
                         his_ce_loss.append(ce_loss.clone().detach().cpu().numpy())
                         his_loss.append(tr_loss_step.clone().detach().cpu().numpy())
-                        epoch_ce_loss.append(ce_loss.clone().detach().cpu().numpy())
+                        self.epoch_ce_loss.append(ce_loss.clone().detach().cpu().numpy())
                         his_d_rl_weight.append(self.dynamic_rl_weight)
                         his_d_rl_weight_l.append(self.dynamic_rl_weight_lambda)
                     if (
@@ -919,9 +900,6 @@ class Trainer(Trainer):
                         print('At step {}, his_kd_ce_loss {}'.format(step, np.mean(self.his_kd_ce_loss)))
                         print('At step {}, his_loss {}'.format(step, np.mean(his_loss)))
                         print('At step {}, distinct_his {}'.format(step, np.mean(self.distinct_his)))
-                        if self.args.use_dynamic_rl_weight:
-                            print('At step {}, rl_weight {}'.format(step, np.mean(his_d_rl_weight)))
-                            print('At step {}, rl_weight_l {}'.format(step, np.mean(his_d_rl_weight_l)))
                         print('At step {}, his_value_loss {}'.format(step, np.mean(self.his_value_loss)))
                         print('At step {}, his_value_acc {}'.format(step, np.mean(self.his_value_acc)))
                         print('At step {}, his_max_reward {}'.format(step, np.mean(self.his_max_reward)))
@@ -933,13 +911,8 @@ class Trainer(Trainer):
                         # assert 1==0
 
 
-
                         to_print_base_tokens_dict = sorted(self.tokens_dict['base_model'].items(), key=lambda item:-item[1])
-
                         to_print_tokens_dict = sorted(self.tokens_dict['gen'].items(), key=lambda item: -item[1])
-                        all_file.append(to_print_base_tokens_dict[:10])
-                        all_file.append(to_print_tokens_dict[:10])
-
 
                         print('mask_rate:', model.mask_rate)
                         print('his_dif_cont_rate', np.mean(self.his_dif_cont_rate))
@@ -1042,7 +1015,7 @@ class Trainer(Trainer):
                         print('gram_loss: 2:{}, 3:{}, 4:{}'.format(np.mean(self.his_2_gram_loss), np.mean(self.his_3_gram_loss),
                               np.mean(self.his_4_gram_loss)))
 
-                    if not self.args.do_parallel_test and ((step + 1) % args.gradient_accumulation_steps == 0 or (
+                    if ((step + 1) % args.gradient_accumulation_steps == 0 or (
                         # last step in epoch but step is always smaller than gradient_accumulation_steps
                         steps_in_epoch <= args.gradient_accumulation_steps
                         and (step + 1) == steps_in_epoch
@@ -1109,11 +1082,11 @@ class Trainer(Trainer):
             #print('epoch_b_rewards {}'.format(np.mean(epoch_b_rewards)))
             for name, v in epoch_b_rewards.items():
                 print('At step {}, his_b_rewards {} = {}'.format(step, name, np.mean(v)))
-            print('epoch_ce_loss {}'.format(np.mean(epoch_ce_loss)))
+            print('epoch_ce_loss {}'.format(np.mean(self.epoch_ce_loss)))
             # for name, v in epoch_b_rewards.items():
             #     all_b_rewards[name].extend(v)
             #all_b_rewards.extend(epoch_b_rewards)
-            all_ce_loss.extend(epoch_ce_loss)
+            all_ce_loss.extend(self.epoch_ce_loss)
             #print('all_b_rewards {}'.format(np.mean(all_b_rewards)))
             print('all_ce_loss {}'.format(np.mean(all_ce_loss)))
             if DebugOption.TPU_METRICS_DEBUG in self.args.debug:
@@ -1127,15 +1100,11 @@ class Trainer(Trainer):
                     )
             if self.control.should_training_stop:
                 break
-            if self.args.do_parallel_test:
-                print('At step {}, his_b_rewards {}'.format(step, np.mean(his_b_rewards)))
-                print('At step {}, his_ce_loss {}'.format(step, np.mean(his_ce_loss)))
+        
         if args.past_index and hasattr(self, "_past"):
             # Clean the state at the end of training
             delattr(self, "_past")
-        if self.args.do_parallel_test:
-            import pickle as pkl
-            #pkl.dump(do_parallel_pkl, open('{}_do_parallel_pkl'.format(self.args.exp_name), 'wb'))
+        
         logger.info("\n\nTraining completed. Do not forget to share your model on huggingface.co/models =)\n\n")
         if args.load_best_model_at_end and self.state.best_model_checkpoint is not None:
             # Wait for everyone to get here so we are sur the model has been saved by process 0.
@@ -1205,91 +1174,34 @@ class Trainer(Trainer):
         """
         model.train()
         inputs = self._prepare_inputs(inputs)
-
         if is_sagemaker_mp_enabled():
             scaler = self.scaler if self.use_amp else None
             loss_mb = smp_forward_backward(model, inputs, self.args.gradient_accumulation_steps, scaler=scaler)
             return loss_mb.reduce_mean().detach().to(self.args.device)
-
         if self.use_amp:
             with autocast():
-                if self.args.do_parallel_test:
-                    model.eval()
-                    with torch.no_grad():
-                        loss, outputs, rl_loss, b_reward = self.compute_rl_loss(model, inputs, return_outputs=True)
-                else:
-                    loss, outputs, rl_loss, b_reward = self.compute_rl_loss(model, inputs, return_outputs=True)
-
-        else:
-            if self.args.do_parallel_test:
-                model.eval()
-                with torch.no_grad():
-                    loss, outputs, rl_loss, b_reward = self.compute_rl_loss(model, inputs, return_outputs=True)
-            else:
-
                 loss, outputs, rl_loss, b_reward = self.compute_rl_loss(model, inputs, return_outputs=True)
-
-        if 'error' in b_reward:
-            model.zero_grad()
-            return loss.detach() * self.args.gradient_accumulation_steps, torch.tensor(0).cuda(), {}
-
-        if self.args.update_mask_rate:
-            model.mask_rate = self.args.st_mask_rate + (self.args.max_mask_rate-self.args.st_mask_rate) * float(self.state.global_step) / self.args.all_steps
-            if self.args.update_rl_weight:
-                self.args.rl_weight = 0.5 *  float(self.state.global_step) / self.args.all_steps
-            model.mask_rate = min(self.args.max_mask_rate, model.mask_rate)
-
-
+        else:
+            loss, outputs, rl_loss, b_reward = self.compute_rl_loss(model, inputs, return_outputs=True)
         ce_loss = loss.clone()
         ce_losses = loss
-
-
-
-        if self.args.use_dynamic_rl_weight:
-            loss = (1-self.dynamic_rl_weight) * -rl_loss + self.dynamic_rl_weight * ce_losses
-        else:
-            # print(self.args.rl_weight,  self.loss_weight)
-            if self.args.rl_weight < 1:
-                if self.args.naive_seq_baseline or self.args.add_rl_loss:
-
-                    loss = self.args.rl_weight * rl_loss + ce_losses
-                    self.his_rl_loss.append(rl_loss.detach().clone().cpu().numpy())
-                else:
-                    loss = self.args.rl_weight * -rl_loss + (1 - self.args.rl_weight) * ce_losses
-                    self.his_rl_loss.append(-rl_loss.detach().clone().cpu().numpy())
-            else:
-
-                loss = self.args.rl_weight * rl_loss + ce_losses
-                # print(loss)
-                # loss = self.args.loss_weight * loss
-                self.his_rl_loss.append(rl_loss.detach().clone().cpu().numpy())
-
+        loss = self.args.rl_weight * rl_loss + ce_losses
+        self.his_rl_loss.append(rl_loss.detach().clone().cpu().numpy())
         if self.args.n_gpu > 1:
             loss = loss.mean()  # mean() to average on multi-gpu parallel training
-
         if self.args.gradient_accumulation_steps > 1 and not self.deepspeed:
             # deepspeed handles loss scaling by gradient_accumulation_steps in its `backward`
             loss = loss / self.args.gradient_accumulation_steps
-            # print(his_loss * accu)
-        st = time.time()
-        if not self.args.do_parallel_test:
-            if self.use_amp:
-                self.scaler.scale(loss).backward()
-            elif self.use_apex:
-                with amp.scale_loss(loss, self.optimizer) as scaled_loss:
-                    scaled_loss.backward()
-            elif self.deepspeed:
-                # loss gets scaled under gradient_accumulation_steps in deepspeed
-                loss = self.deepspeed.backward(loss)
-            else:
-                loss.backward()
-        ed = time.time()-st
-        self.his_time.append(ed)
-
-
+        if self.use_amp:
+            self.scaler.scale(loss).backward()
+        elif self.use_apex:
+            with amp.scale_loss(loss, self.optimizer) as scaled_loss:
+                scaled_loss.backward()
+        elif self.deepspeed:
+            loss = self.deepspeed.backward(loss)
+        else:
+            loss.backward()
         return loss.detach() * self.args.gradient_accumulation_steps, ce_loss.detach(), b_reward
-
-
 
     @timer
     def compute_rl_loss(self, model, inputs, return_outputs=False):
@@ -1358,10 +1270,7 @@ class Trainer(Trainer):
         elif self.args.seq_decode_model == 'bart':
             eos_token_id = 2
             pad_token_id = 1
-
         model.train()
-        if self.args.use_eval:
-            model.eval()
         def compute_acc_and_loss(max_ids, labels_, mp, log_probs_all):
             tot_cont = 0
             dif_cont = 0
@@ -1438,7 +1347,6 @@ class Trainer(Trainer):
                 self.his_4_gram_loss.append(_4_gram_loss.cpu())
             return batch_2_gram_pos, batch_3_gram_pos, batch_4_gram_pos, batch_n_gram_pos
 
-
         def compute_dif(y_b, mp):
             tot_cont = 0
             dif_cont = 0
@@ -1448,10 +1356,8 @@ class Trainer(Trainer):
                 for i in range(len(p_n) - 1, -1, -1):
                     if i > 0 and p_n[i] == p_n[i - 1] + 1:
                         tot_cont += 1
-
                         if pre_output_ids[k][p_n[i]] != pre_output_ids[k][p_n[i - 1]]:
                             dif_cont += 1
-
             if tot_cont != 0:
                 self.his_dif_cont_rate.append(dif_cont / tot_cont)
         pre_gen_scores = None

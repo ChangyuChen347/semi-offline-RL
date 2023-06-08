@@ -249,11 +249,9 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
             self.out_mask_rate = config.out_mask_rate
             self.io_not_same_mask = config.io_not_same_mask
             self.tokenizer_name = config.tokenizer_name
-            self.model_parallel = False
+
             self.device_map = None
-            self.do_parallel_test_model = config.do_parallel_test_model
-            self.inv_out_mask = config.inv_out_mask
-            self.tail_unmask_num = config.tail_unmask_num
+
             self.truth_log_probs = config.truth_log_probs
             self.is_scoring_mode = False
             self.do_rl = config.do_rl
@@ -552,7 +550,7 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
                         label_np = labels_numpy[i]
                         cand_pos = []
                         k = 0
-                        while k < non_zero_sum[i] - self.tail_unmask_num:
+                        while k < non_zero_sum[i]:
                             if tmp_tks[i][k][0] != '▁':  # if pre is mask this is not mask it will connect
                                 should_mask_pos[i][k] = 1
                             else:
@@ -606,11 +604,8 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
                                 if self.mask_input:
                                     mask_labels[i][j] = get_masked_token(mask_labels[i][j])
                             out_sample_num = int(len(cand_pos) * self.out_mask_rate)
-                            if self.inv_out_mask:
-                                sample_pos_set = set(sample_pos)
-                                sample_pos2 = [t for t in cand_pos if t not in sample_pos_set]
-                            else:
-                                sample_pos2 = np_rand.choice(a=np.array(cand_pos), size=out_sample_num,
+
+                            sample_pos2 = np_rand.choice(a=np.array(cand_pos), size=out_sample_num,
                                                              replace=False).tolist()
                             sample_pos2 = sorted(sample_pos2)
                             for idx, j in enumerate(sample_pos2):

@@ -39,19 +39,12 @@ class PegasusForConditionalGeneration(PegasusForConditionalGeneration):
         self.out_mask_rate = config.out_mask_rate
         self.io_not_same_mask = config.io_not_same_mask
         self.tokenizer_name = config.tokenizer_name
-        self.model_parallel = False
         self.device_map = None
-        self.do_parallel_test_model = config.do_parallel_test_model
-        self.inv_out_mask = config.inv_out_mask
-        self.tail_unmask_num = config.tail_unmask_num
         self.truth_log_probs = config.truth_log_probs
         self.is_scoring_mode = False
         self.vocab_size = config.vocab_size
-        self.use_cont_mask_id = config.use_cont_mask_id
         self.mask_id = 3
         self.span_mask = config.span_mask
-        self.keep_prob = config.keep_prob
-        self.random_prob = config.random_prob
         self.not_mask_stop = config.not_mask_stop
         self.sample_topk = config.sample_topk
 
@@ -175,18 +168,7 @@ class PegasusForConditionalGeneration(PegasusForConditionalGeneration):
 
 
     def get_masked_token(self, tk_id, cont):
-        p = random.random()
-        # self.keep_prob = 0.1
-        # self.random_prob = 0.1
-        if p < self.keep_prob:
-            return tk_id
-        elif p < self.keep_prob + self.random_prob:
-            return random.randint(0, self.vocab_size - 1)
-        else:
-            if not self.use_cont_mask_id:
-                return self.mask_id
-            else:
-                return self.mask_id + cont
+        return self.mask_id
 
 
 
@@ -279,7 +261,7 @@ class PegasusForConditionalGeneration(PegasusForConditionalGeneration):
                     label_np = labels_numpy[i]
                     cand_pos = []
                     k = 0
-                    while k < non_zero_sum[i] - self.tail_unmask_num:
+                    while k < non_zero_sum[i]:
                         if not v2:
                             if tmp_tks[i][k][0] != '▁':  # if pre is mask this is not mask it will connect
                                 should_mask_pos[i][k] = 1
@@ -345,11 +327,8 @@ class PegasusForConditionalGeneration(PegasusForConditionalGeneration):
                             if self.mask_input:
                                 mask_labels[i][j] = self.get_masked_token(mask_labels[i][j], cont)
                         out_sample_num = int(len(cand_pos) * self.out_mask_rate)
-                        if self.inv_out_mask:
-                            sample_pos_set = set(sample_pos)
-                            sample_pos2 = [t for t in cand_pos if t not in sample_pos_set]
-                        else:
-                            sample_pos2 = np_rand.choice(a=np.array(cand_pos), size=out_sample_num,
+
+                        sample_pos2 = np_rand.choice(a=np.array(cand_pos), size=out_sample_num,
                                                          replace=False).tolist()
                         sample_pos2 = sorted(sample_pos2)
                         for idx, j in enumerate(sample_pos2):
@@ -458,16 +437,9 @@ class PegasusForConditionalGeneration(PegasusForConditionalGeneration):
 
                             # print(probs[0])
                         prob = torch.gather(probs, dim=1, index=masked_ids)
-                        if self.config.prob_w:
-                            prob_w = torch.gather(probs.detach().clone(), dim=1, index=masked_ids)
-
                         masked_ids = masked_ids.reshape(-1, s2, self.config.sample_num + 1).transpose(1, 2)
-                        if self.config.prob_w:
-                            prob_w = prob_w.reshape(-1, s2, self.config.sample_num + 1).transpose(1, 2)
                         prob = prob.reshape(-1, s2, self.config.sample_num + 1).transpose(1, 2)
                         log_probs = torch.log(prob)
-                        if self.config.prob_w:
-                            log_probs = log_probs * prob_w
                         masked_ids = masked_ids.reshape(bs * (self.config.sample_num + 1), s2)
                         log_probs = log_probs.reshape(bs * (self.config.sample_num + 1), s2)
 
