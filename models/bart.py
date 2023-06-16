@@ -217,13 +217,45 @@ class BartForConditionalGeneration(BartForConditionalGeneration):
         mask_labels=None,
         masked_pos_shift=None,
         masked_pos_non_shift=None,
-        non_masked_pos_shift=None,
+
     ):
         r"""
-        labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size, sequence_length)`, `optional`):
-            Labels for computing the masked language modeling loss. Indices should either be in ``[0, ...,
-            config.vocab_size]`` or -100 (see ``input_ids`` docstring). Tokens with indices set to ``-100`` are ignored
-            (masked), the loss is only computed for the tokens with labels in ``[0, ..., config.vocab_size]``.
+        Executes a forward pass for reinforcement learning-based sequence-to-sequence model training.
+
+        input_ids (torch.Tensor, optional): Input sequence token IDs. Shape: (batch_size, sequence_length).
+        attention_mask (torch.Tensor, optional): Attention mask indicating the position of padding tokens.
+            Shape: (batch_size, sequence_length).
+        decoder_input_ids (torch.Tensor, optional): Decoder input sequence token IDs.
+            Shape: (batch_size, sequence_length).
+        decoder_attention_mask (torch.Tensor, optional): Attention mask for the decoder.
+            Shape: (batch_size, sequence_length).
+        head_mask (torch.Tensor, optional): Mask to nullify selected heads of the self-attention modules
+            of the encoder. Shape: (num_layers, num_heads).
+        decoder_head_mask (torch.Tensor, optional): Mask to nullify selected heads of the self-attention modules
+            of the decoder. Shape: (num_layers, num_heads).
+        cross_attn_head_mask (torch.Tensor, optional): Mask to nullify selected heads of the cross-attention modules
+            of the decoder. Shape: (num_layers, num_heads).
+        encoder_outputs (tuple, optional): Tuple containing the outputs of the encoder.
+            This is used in case the encoder is already pre-computed. Must contain (last_hidden_state, hidden_states, attentions).
+        past_key_values (tuple, optional): Tuple containing the cached key/value states of the decoder.
+            Used to speed up decoding when generating text. Must contain (decoder_past_key_values, cross_past_key_values).
+        inputs_embeds (torch.Tensor, optional): Embeddings of the input tokens. Shape: (batch_size, sequence_length, hidden_size).
+        decoder_inputs_embeds (torch.Tensor, optional): Embeddings of the decoder input tokens.
+            Shape: (batch_size, sequence_length, hidden_size).
+        labels (torch.Tensor, optional): Labels for computing the masked language modeling loss.
+            Indices should either be in [0, ..., config.vocab_size] or -100. Tokens with indices set to -100 are ignored.
+            Shape: (batch_size, sequence_length).
+        use_cache (bool, optional): Whether to use the cached key/value states of the decoder.
+        output_attentions (bool, optional): Whether to return the attention weights.
+        output_hidden_states (bool, optional): Whether to return the hidden states.
+        return_dict (bool, optional): Whether to return a `Seq2SeqLMOutput` instead of multiple output tensors.
+        mask_labels (torch.Tensor, optional): Masked labels for computing the masked language modeling loss.
+            Shape: (batch_size, sequence_length).
+        masked_pos_shift (torch.Tensor, optional): Tensor indicating the positions of shifted masked tokens.
+            Shape: (batch_size, sequence_length).
+        masked_pos_non_shift (torch.Tensor, optional): Tensor indicating the positions of non-shifted masked tokens.
+            Shape: (batch_size, sequence_length).
+
         Returns:
         """
         import time
@@ -256,7 +288,7 @@ class BartForConditionalGeneration(BartForConditionalGeneration):
                         labels.data.eq(1) | labels.data.eq(2) | labels.data.eq(-100))  # 0 pad 2 eos -100 pad
                 non_zero_sum_tensor = non_zero_labels.sum(-1)  # bs
                 non_zero_sum = non_zero_sum_tensor.detach().cpu().numpy().tolist()
-                non_masked_pos_shift = torch.zeros_like(mask_labels)
+
                 if masked_pos_shift is None:
                     masked_pos_shift = torch.zeros_like(mask_labels)  # bs, seq
                     masked_pos_non_shift = torch.zeros_like(mask_labels)  # bs, seq
@@ -278,7 +310,7 @@ class BartForConditionalGeneration(BartForConditionalGeneration):
                             if label_np[k] == 0:
                                 k += 1
                                 continue
-                            if tmp_tks[i][k][0] != 'Ġ' and tmp_tks[i][k] != '.' and tmp_tks[i][k] != ',':  # if pre is mask this is not mask it will connect
+                            if tmp_tks[i][k][0] != 'Ġ' and tmp_tks[i][k] != '.' and tmp_tks[i][k] != ',':  # if the previous token is [mask], we should mask the whole span
                                 should_mask_pos[i][k] = 1
                             else:
                                 should_mask_pos[i][k] = 0
@@ -289,7 +321,7 @@ class BartForConditionalGeneration(BartForConditionalGeneration):
                                         k - 1] == 'Ġ,' or tmp_tks[i][k - 1] == 'Ġ.'):
                                         k += 1
                                         continue
-                            if tmp_tks[i][k][0] != 'Ġ' and tmp_tks[i][k] != '.' and tmp_tks[i][k] != ',':  # if pre is mask this is not mask it will connect
+                            if tmp_tks[i][k][0] != 'Ġ' and tmp_tks[i][k] != '.' and tmp_tks[i][k] != ',':  # if the previous token is [mask], we should mask the whole span
                                 should_mask_pos[i][k] = 1
                             else:
                                 should_mask_pos[i][k] = 0
@@ -328,9 +360,7 @@ class BartForConditionalGeneration(BartForConditionalGeneration):
                                 mask_labels[i][j] = self.get_masked_token(mask_labels[i][j], cont)
                             masked_pos_shift[i][idx] = j + 1
                             masked_pos_non_shift[i][idx] = j
-                        for idx, j in enumerate(non_sample_pos):
-                            if random.random() <= 1:
-                                non_masked_pos_shift[i][idx] = j
+
 
                 decoder_input_ids = shift_tokens_right(
                     mask_labels, self.config.pad_token_id, 0
@@ -360,7 +390,7 @@ class BartForConditionalGeneration(BartForConditionalGeneration):
         lm_logits2 = None
 
 
-        def construct_return(lm_logits, labels, bs, masked_pos_shift, non_masked_pos_shift, masked_pos_non_shift, ce=False):
+        def construct_return(lm_logits, labels, bs, masked_pos_shift,  masked_pos_non_shift, ce=False):
             if masked_pos_non_shift is not None:
                 topk = self.sample_topk
                 if topk == -1:
@@ -490,7 +520,6 @@ class BartForConditionalGeneration(BartForConditionalGeneration):
         lm_logits = self.lm_head(outputs[0]) + self.final_logits_bias
 
         if lm_logits is not None and input_ids is not None and lm_logits.shape[0] != input_ids.shape[0]:
-            # print(lm_logits.shape)
             lm_logits = lm_logits.reshape(-1, 2, lm_logits.shape[-2], lm_logits.shape[-1])
             ce_lm_logits = lm_logits[:, 0, :]
             lm_logits = lm_logits[:, 1, :]
@@ -499,28 +528,23 @@ class BartForConditionalGeneration(BartForConditionalGeneration):
             labels = ce_labels[:, 1, :]
             ce_labels = ce_labels[:, 0, :]
 
-            # labels = labels.reshape(-1, 2, labels.shape[-1])
             masked_pos_shift = masked_pos_shift.reshape(-1, 2, masked_pos_shift.shape[-1])
             ce_masked_pos_shift = masked_pos_shift[:, 0, :]
             masked_pos_shift = masked_pos_shift[:, 1, :]
             masked_pos_non_shift = masked_pos_non_shift.reshape(-1, 2, masked_pos_non_shift.shape[-1])
             ce_masked_pos_non_shift = masked_pos_non_shift[:, 0, :]
             masked_pos_non_shift = masked_pos_non_shift[:, 1, :]
-            non_masked_pos_shift = non_masked_pos_shift.reshape(-1, 2, non_masked_pos_shift.shape[-1])
-            ce_non_masked_pos_shift = non_masked_pos_shift[:, 0, :]
-            non_masked_pos_shift = non_masked_pos_shift[:, 1, :]
+
             res= [construct_return(lm_logits=ce_lm_logits, labels=ce_labels, bs=bs//2,
-                                    non_masked_pos_shift=ce_non_masked_pos_shift, masked_pos_shift=ce_masked_pos_shift, masked_pos_non_shift=ce_masked_pos_non_shift, ce=True),
+                                     masked_pos_shift=ce_masked_pos_shift,
+                                   masked_pos_non_shift=ce_masked_pos_non_shift,
+                                   ce=True),
                     construct_return(lm_logits=lm_logits, labels=labels, bs=bs // 2,
-                                     non_masked_pos_shift=non_masked_pos_shift, masked_pos_shift=masked_pos_shift,
+                                      masked_pos_shift=masked_pos_shift,
                                      masked_pos_non_shift=masked_pos_non_shift),
 
                     ]
         else:
-            res= construct_return(lm_logits=lm_logits, labels=labels, bs=bs, non_masked_pos_shift=non_masked_pos_shift,
+            res= construct_return(lm_logits=lm_logits, labels=labels, bs=bs,
                                     masked_pos_shift=masked_pos_shift, masked_pos_non_shift=masked_pos_non_shift)
         return res
-
-
-
-

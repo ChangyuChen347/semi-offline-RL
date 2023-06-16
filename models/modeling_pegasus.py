@@ -193,7 +193,7 @@ class PegasusForConditionalGeneration(PegasusForConditionalGeneration):
             mask_labels=None,
             masked_pos_shift=None,
             masked_pos_non_shift=None,
-            non_masked_pos_shift=None,
+
     ) -> Union[Tuple, Seq2SeqLMOutput]:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
@@ -238,7 +238,7 @@ class PegasusForConditionalGeneration(PegasusForConditionalGeneration):
                     return tks
                 tmp_tks = get_tks(mask_labels.clone().detach().cpu().numpy())
                 masked_pos_shift = torch.zeros_like(mask_labels)  # bs, seq
-                non_masked_pos_shift = torch.zeros_like(mask_labels)  # bs, seq
+
                 masked_pos_non_shift = torch.zeros_like(mask_labels)  # bs, seq
                 non_zero_labels = ~(
                             labels.data.eq(0) | labels.data.eq(1) | labels.data.eq(-100))  # 0 pad 1 <\s> -100 pad
@@ -263,7 +263,7 @@ class PegasusForConditionalGeneration(PegasusForConditionalGeneration):
                     k = 0
                     while k < non_zero_sum[i]:
                         if not v2:
-                            if tmp_tks[i][k][0] != '▁':  # if pre is mask this is not mask it will connect
+                            if tmp_tks[i][k][0] != '▁':  # if the previous token is [mask], we should mask the whole span
                                 should_mask_pos[i][k] = 1
                             else:
                                 should_mask_pos[i][k] = 0
@@ -278,7 +278,7 @@ class PegasusForConditionalGeneration(PegasusForConditionalGeneration):
                                         k += 1
                                         continue
                         else:
-                            if tmp_tks[i][k][0] != '▁' and tmp_tks[i][k] != '.' and tmp_tks[i][k] != ',':  # if pre is mask this is not mask it will connect
+                            if tmp_tks[i][k][0] != '▁' and tmp_tks[i][k] != '.' and tmp_tks[i][k] != ',':  # if the previous token is [mask], we should mask the whole span
                                 should_mask_pos[i][k] = 1
                             else:
                                 should_mask_pos[i][k] = 0
@@ -345,10 +345,8 @@ class PegasusForConditionalGeneration(PegasusForConditionalGeneration):
                                 mask_labels[i][j] = self.get_masked_token(mask_labels[i][j], cont)
                             masked_pos_shift[i][idx] = j + 1
                             masked_pos_non_shift[i][idx] = j
-                        for idx, j in enumerate(non_sample_pos):
-                            if random.random() < 0.5:
-                                non_masked_pos_shift[i][idx] = j
-                #decoder_input_ids = self._shift_right(mask_labels)  # 0, 1, 2  pred 1, 2,
+
+
                 decoder_input_ids = shift_tokens_right(
                         mask_labels, self.config.pad_token_id, self.config.decoder_start_token_id
                     )
@@ -379,7 +377,7 @@ class PegasusForConditionalGeneration(PegasusForConditionalGeneration):
 
 
 
-        def construct_return(lm_logits, labels, bs, masked_pos_shift, non_masked_pos_shift, masked_pos_non_shift,
+        def construct_return(lm_logits, labels, bs, masked_pos_shift,  masked_pos_non_shift,
                              ce=False):
 
             if mask_decoder_inputs and masked_pos_non_shift is not None:
@@ -420,39 +418,39 @@ class PegasusForConditionalGeneration(PegasusForConditionalGeneration):
                 y_b_g_m = y_b_g * (1 - mp_long) + torch.ones_like(max_ids).long().cuda() * self.mask_id * mp_long
 
                 if self.config.sample_num != 0:
-                    if self.config.sample_method == 'multi':
-                        _, s2, s3 = probs.shape
-                        probs = probs.reshape(-1, s3)
-                        if self.config.use_logit:
-                            logits = lm_logits.reshape(-1, s3)
-                        masked_ids = torch.multinomial(probs, self.config.sample_num + 1, replacement=True)
-                        # bs * seq_len, sample_num
-                        if self.config.use_logit:
 
-                            mask = torch.zeros_like(logits).cuda().long().scatter_(1, masked_ids,
-                                                                                   torch.ones_like(
-                                                                                       masked_ids).long().cuda())
+                    _, s2, s3 = probs.shape
+                    probs = probs.reshape(-1, s3)
+                    if self.config.use_logit:
+                        logits = lm_logits.reshape(-1, s3)
+                    masked_ids = torch.multinomial(probs, self.config.sample_num + 1, replacement=True)
+                    # bs * seq_len, sample_num
+                    if self.config.use_logit:
 
-                            probs = torch.softmax(mask * logits, -1)
+                        mask = torch.zeros_like(logits).cuda().long().scatter_(1, masked_ids,
+                                                                               torch.ones_like(
+                                                                                   masked_ids).long().cuda())
 
-                            # print(probs[0])
-                        prob = torch.gather(probs, dim=1, index=masked_ids)
-                        masked_ids = masked_ids.reshape(-1, s2, self.config.sample_num + 1).transpose(1, 2)
-                        prob = prob.reshape(-1, s2, self.config.sample_num + 1).transpose(1, 2)
-                        log_probs = torch.log(prob)
-                        masked_ids = masked_ids.reshape(bs * (self.config.sample_num + 1), s2)
-                        log_probs = log_probs.reshape(bs * (self.config.sample_num + 1), s2)
+                        probs = torch.softmax(mask * logits, -1)
 
-                        pad_2_zero_labels = pad_2_zero_labels.unsqueeze(1).expand(-1, self.config.sample_num + 1, -1)
-                        pad_2_zero_labels = pad_2_zero_labels.reshape(bs * (self.config.sample_num + 1), -1)
-                        mp_long = mp_long.unsqueeze(1).expand(-1, self.config.sample_num + 1, -1)
-                        mp_long = mp_long.reshape(bs * (self.config.sample_num + 1), -1)
-                        mp = mp.unsqueeze(1).expand(-1, self.config.sample_num + 1, -1)
-                        mp = mp.reshape(bs * (self.config.sample_num + 1), -1)
+                        # print(probs[0])
+                    prob = torch.gather(probs, dim=1, index=masked_ids)
+                    masked_ids = masked_ids.reshape(-1, s2, self.config.sample_num + 1).transpose(1, 2)
+                    prob = prob.reshape(-1, s2, self.config.sample_num + 1).transpose(1, 2)
+                    log_probs = torch.log(prob)
+                    masked_ids = masked_ids.reshape(bs * (self.config.sample_num + 1), s2)
+                    log_probs = log_probs.reshape(bs * (self.config.sample_num + 1), s2)
+
+                    pad_2_zero_labels = pad_2_zero_labels.unsqueeze(1).expand(-1, self.config.sample_num + 1, -1)
+                    pad_2_zero_labels = pad_2_zero_labels.reshape(bs * (self.config.sample_num + 1), -1)
+                    mp_long = mp_long.unsqueeze(1).expand(-1, self.config.sample_num + 1, -1)
+                    mp_long = mp_long.reshape(bs * (self.config.sample_num + 1), -1)
+                    mp = mp.unsqueeze(1).expand(-1, self.config.sample_num + 1, -1)
+                    mp = mp.reshape(bs * (self.config.sample_num + 1), -1)
 
 
-                        pads = pads.unsqueeze(1).expand(-1, self.config.sample_num + 1, -1)
-                        pads = pads.reshape(bs * (self.config.sample_num + 1), -1)
+                    pads = pads.unsqueeze(1).expand(-1, self.config.sample_num + 1, -1)
+                    pads = pads.reshape(bs * (self.config.sample_num + 1), -1)
                 else:
                     _, s2, s3 = probs.shape
                     probs = probs.reshape(-1, s3)
@@ -491,7 +489,7 @@ class PegasusForConditionalGeneration(PegasusForConditionalGeneration):
                     truth_log_probs = log_probs.clone().gather(2, pad_2_zero_labels.unsqueeze(2)).squeeze()
                 else:
                     truth_log_probs = None
-                if self.config.sample_num != 0 and self.config.sample_method == 'multi':
+                if self.config.sample_num != 0:
                     log_probs = log_probs * mp.float()
 
             loss = None
@@ -548,22 +546,17 @@ class PegasusForConditionalGeneration(PegasusForConditionalGeneration):
             masked_pos_non_shift = masked_pos_non_shift.reshape(-1, 2, masked_pos_non_shift.shape[-1])
             ce_masked_pos_non_shift = masked_pos_non_shift[:, 0, :]
             masked_pos_non_shift = masked_pos_non_shift[:, 1, :]
-            non_masked_pos_shift = non_masked_pos_shift.reshape(-1, 2, non_masked_pos_shift.shape[-1])
-            ce_non_masked_pos_shift = non_masked_pos_shift[:, 0, :]
-            non_masked_pos_shift = non_masked_pos_shift[:, 1, :]
 
             res = [construct_return(lm_logits=ce_lm_logits, labels=ce_labels, bs=bs // 2,
-                                    non_masked_pos_shift=ce_non_masked_pos_shift, masked_pos_shift=ce_masked_pos_shift,
+                                   masked_pos_shift=ce_masked_pos_shift,
                                     masked_pos_non_shift=ce_masked_pos_non_shift, ce=True),
                    construct_return(lm_logits=lm_logits, labels=labels, bs=bs // 2,
-                                    non_masked_pos_shift=non_masked_pos_shift, masked_pos_shift=masked_pos_shift,
+                                   masked_pos_shift=masked_pos_shift,
                                     masked_pos_non_shift=masked_pos_non_shift),
 
                    ]
-
-
         else:
-            res = construct_return(lm_logits=lm_logits, labels=labels, bs=bs, non_masked_pos_shift=non_masked_pos_shift,
+            res = construct_return(lm_logits=lm_logits, labels=labels, bs=bs,
                                    masked_pos_shift=masked_pos_shift, masked_pos_non_shift=masked_pos_non_shift)
         return res
 

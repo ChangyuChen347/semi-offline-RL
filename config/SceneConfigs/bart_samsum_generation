@@ -18,8 +18,6 @@
 --tok_max_length 512
 --model lidiya/bart-large-xsum-samsum
 --trainer rl
---eos_replace False
---post_replace False
 --save_steps 10000000
 
 bo

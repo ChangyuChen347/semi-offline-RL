@@ -24,10 +24,7 @@
 --tok_max_length 512
 --model Yale-LILY/brio-xsum-cased
 --trainer rl
---eos_replace False
---post_replace False
 --save_steps 10000000
---increase_id fix_decrease
 --rouge_type 'xsum'
 --reward_type 'rouges'
 bo

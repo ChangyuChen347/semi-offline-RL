@@ -16,139 +16,6 @@ from transformers.modeling_outputs import (
     Seq2SeqModelOutput,
 )
 
-@replace(T5Attention)
-class T5Attention(T5Attention):
-
-    def forward(
-        self,
-        hidden_states,
-        mask=None,
-        key_value_states=None,
-        position_bias=None,
-        past_key_value=None,
-        layer_head_mask=None,
-        query_length=None,
-        use_cache=False,
-        output_attentions=False,
-    ):
-        """
-        Self-attention (if key_value_states is None) or attention over source sentence (provided by key_value_states).
-        """
-        # Input is (batch_size, seq_length, dim)
-        # Mask is (batch_size, key_length) (non-causal) or (batch_size, key_length, key_length)
-        # past_key_value[0] is (batch_size, n_heads, q_len - 1, dim_per_head)
-        batch_size, seq_length = hidden_states.shape[:2]
-
-        int_seq_length = int(seq_length)
-
-        real_seq_length = seq_length
-
-        if past_key_value is not None:
-            assert (
-                len(past_key_value) == 2
-            ), f"past_key_value should have 2 past states: keys and values. Got { len(past_key_value)} past states"
-            real_seq_length += past_key_value[0].shape[2] if query_length is None else query_length
-
-        key_length = real_seq_length if key_value_states is None else key_value_states.shape[1]
-
-        def shape(states):
-            """projection"""
-            return states.view(states.size()[0], -1, self.n_heads, self.key_value_proj_dim).transpose(1, 2)
-
-        def unshape(states):
-            """reshape"""
-            return states.transpose(1, 2).contiguous().view(batch_size, -1, self.inner_dim)
-
-        def project(hidden_states, proj_layer, key_value_states, past_key_value):
-            """projects hidden states correctly to key/query states"""
-            if key_value_states is None:
-                # self-attn
-                # (batch_size, n_heads, seq_length, dim_per_head)
-                hidden_states = shape(proj_layer(hidden_states))
-            elif past_key_value is None:
-                # cross-attn
-                # (batch_size, n_heads, seq_length, dim_per_head)
-                hidden_states = shape(proj_layer(key_value_states))
-
-            if past_key_value is not None:
-                if key_value_states is None:
-                    # self-attn
-                    # (batch_size, n_heads, key_length, dim_per_head)
-                    hidden_states = torch.cat([past_key_value, hidden_states], dim=2)
-                else:
-                    # cross-attn
-                    hidden_states = past_key_value
-            return hidden_states
-
-        # get query states
-        query_states = shape(self.q(hidden_states))  # (batch_size, n_heads, seq_length, dim_per_head)
-
-        # get key/value states
-        key_states = project(
-            hidden_states, self.k, key_value_states, past_key_value[0] if past_key_value is not None else None
-        )
-        value_states = project(
-            hidden_states, self.v, key_value_states, past_key_value[1] if past_key_value is not None else None
-        )
-
-        kv_batch_size = key_states.size(0)
-
-        ## compute scores
-        #scores = torch.matmul(
-        #    query_states, key_states.transpose(3, 2)
-        #)  # equivalent of torch.einsum("bnqd,bnkd->bnqk", query_states, key_states), compatible with onnx op>9
-
-        scores = torch.einsum("bxnqd,bnkd->bxnqk",
-                        query_states.view(kv_batch_size, -1, *query_states.size()[1:]),
-                        key_states)
-
-        scores = scores.reshape(-1,*scores.size()[2:])
-
-        if position_bias is None:
-            if not self.has_relative_attention_bias:
-                position_bias = torch.zeros(
-                    (1, self.n_heads, real_seq_length, key_length), device=scores.device, dtype=scores.dtype
-                )
-                if self.training and self.gradient_checkpointing:
-                    position_bias.requires_grad = True
-            else:
-                position_bias = self.compute_bias(real_seq_length, key_length)
-
-            # if key and values are already calculated
-            # we want only the last query position bias
-            if past_key_value is not None:
-                position_bias = position_bias[:, :, -int_seq_length:, :]
-
-            if mask is not None:
-                position_bias = position_bias + mask  # (batch_size, n_heads, seq_length, key_length)
-
-        scores += position_bias
-        attn_weights = F.softmax(scores.float(), dim=-1).type_as(
-            scores
-        )  # (batch_size, n_heads, seq_length, key_length)
-        attn_weights = F.dropout(
-            attn_weights, p=self.dropout, training=self.training
-        )  # (batch_size, n_heads, seq_length, key_length)
-
-        # Mask heads if we want to
-        if layer_head_mask is not None:
-            attn_weights = attn_weights * layer_head_mask
-
-
-        ##attn_output = unshape(torch.matmul(attn_weights, value_states))  # (batch_size, seq_length, dim)
-        attn_output = torch.einsum("bxnqk,bnkd->bxnqd",
-                             attn_weights.view(kv_batch_size,-1,*attn_weights.size()[1:]),
-                             value_states)
-        attn_output = attn_output.reshape(-1,*attn_output.size()[2:])
-        attn_output = unshape(attn_output)
-        attn_output = self.o(attn_output)
-
-        present_key_value_state = (key_states, value_states) if (self.is_decoder and use_cache) else None
-        outputs = (attn_output,) + (present_key_value_state,) + (position_bias,)
-
-        if output_attentions:
-            outputs = outputs + (attn_weights,)
-        return outputs
 
 class RLSeq2SeqLMOutput(ModelOutput):
     """
@@ -454,7 +321,7 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
             mask_labels=None,
             masked_pos_shift=None,
             masked_pos_non_shift=None,
-            non_masked_pos_shift=None,
+
     ):
         r"""
         labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size,)`, `optional`):
@@ -522,7 +389,7 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
                         labels.data.eq(0) | labels.data.eq(1) | labels.data.eq(-100))  # 0 pad 1 <\s> -100 pad
                 non_zero_sum_tensor = non_zero_labels.sum(-1)  # b
                 non_zero_sum = non_zero_sum_tensor.detach().cpu().numpy().tolist()
-                non_masked_pos_shift = torch.zeros_like(labels)
+
                 if mask_labels is None:
                     mask_labels = labels.detach().cpu().clone()  # bs, seq
                     mask_labels_np = mask_labels.numpy()
@@ -551,7 +418,7 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
                         cand_pos = []
                         k = 0
                         while k < non_zero_sum[i]:
-                            if tmp_tks[i][k][0] != '▁':  # if pre is mask this is not mask it will connect
+                            if tmp_tks[i][k][0] != '▁':  # if the previous token is [mask], we should mask the whole span
                                 should_mask_pos[i][k] = 1
                             else:
                                 should_mask_pos[i][k] = 0
@@ -618,9 +485,7 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
                                     mask_labels[i][j] = get_masked_token(mask_labels[i][j])
                                 masked_pos_shift[i][idx] = j + 1
                                 masked_pos_non_shift[i][idx] = j
-                            for idx, j in enumerate(non_sample_pos):
-                                if random.random() < 0.25:
-                                    non_masked_pos_shift[i][idx] = j
+
 
                 decoder_input_ids = self._shift_right(mask_labels)  # 0, 1, 2  pred 1, 2,
             else:
@@ -693,7 +558,7 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
 
         predict_baseline = None
 
-        def construct_return(lm_logits, labels, bs, masked_pos_shift, non_masked_pos_shift, masked_pos_non_shift,
+        def construct_return(lm_logits, labels, bs, masked_pos_shift,  masked_pos_non_shift,
                              ce=False):
 
             if mask_decoder_inputs and masked_pos_non_shift is not None:
@@ -735,36 +600,34 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
                 if not ce:
                     sample_num = self.config.sample_num
                 if sample_num != 0:
+                    _, s2, s3 = probs.shape
+                    probs = probs.reshape(-1, s3)
+                    logits = lm_logits.reshape(-1, s3)
+                    masked_ids = torch.multinomial(probs, sample_num + 1, replacement=True)
+                    # bs * seq_len, sample_num
 
-                    if self.config.sample_method == 'multi':
-                        _, s2, s3 = probs.shape
-                        probs = probs.reshape(-1, s3)
-                        logits = lm_logits.reshape(-1, s3)
-                        masked_ids = torch.multinomial(probs, sample_num + 1, replacement=True)
-                        # bs * seq_len, sample_num
+                    mask = torch.zeros_like(logits).cuda().long().scatter_(1, masked_ids,
+                                                                           torch.ones_like(
+                                                                               masked_ids).long().cuda())
+                    probs = torch.softmax(mask * logits, -1)
 
-                        mask = torch.zeros_like(logits).cuda().long().scatter_(1, masked_ids,
-                                                                               torch.ones_like(
-                                                                                   masked_ids).long().cuda())
-                        probs = torch.softmax(mask * logits, -1)
+                    prob = torch.gather(probs, dim=1, index=masked_ids)
+                    masked_ids = masked_ids.reshape(-1, s2, sample_num + 1).transpose(1, 2)
+                    prob = prob.reshape(-1, s2, sample_num + 1).transpose(1, 2)
+                    log_probs = torch.log(prob)
+                    masked_ids = masked_ids.reshape(bs * (sample_num + 1), s2)
+                    log_probs = log_probs.reshape(bs * (sample_num + 1), s2)
 
-                        prob = torch.gather(probs, dim=1, index=masked_ids)
-                        masked_ids = masked_ids.reshape(-1, s2, sample_num + 1).transpose(1, 2)
-                        prob = prob.reshape(-1, s2, sample_num + 1).transpose(1, 2)
-                        log_probs = torch.log(prob)
-                        masked_ids = masked_ids.reshape(bs * (sample_num + 1), s2)
-                        log_probs = log_probs.reshape(bs * (sample_num + 1), s2)
+                    pad_2_zero_labels = pad_2_zero_labels.unsqueeze(1).expand(-1, sample_num + 1, -1)
+                    pad_2_zero_labels = pad_2_zero_labels.reshape(bs * (sample_num + 1), -1)
 
-                        pad_2_zero_labels = pad_2_zero_labels.unsqueeze(1).expand(-1, sample_num + 1, -1)
-                        pad_2_zero_labels = pad_2_zero_labels.reshape(bs * (sample_num + 1), -1)
+                    mp_long = mp_long.unsqueeze(1).expand(-1, sample_num + 1, -1)
+                    mp_long = mp_long.reshape(bs * (sample_num + 1), -1)
+                    mp = mp.unsqueeze(1).expand(-1, sample_num + 1, -1)
+                    mp = mp.reshape(bs * (sample_num + 1), -1)
 
-                        mp_long = mp_long.unsqueeze(1).expand(-1, sample_num + 1, -1)
-                        mp_long = mp_long.reshape(bs * (sample_num + 1), -1)
-                        mp = mp.unsqueeze(1).expand(-1, sample_num + 1, -1)
-                        mp = mp.reshape(bs * (sample_num + 1), -1)
-
-                        pads = pads.unsqueeze(1).expand(-1, sample_num + 1, -1)
-                        pads = pads.reshape(bs * (sample_num + 1), -1)
+                    pads = pads.unsqueeze(1).expand(-1, sample_num + 1, -1)
+                    pads = pads.reshape(bs * (sample_num + 1), -1)
 
                 y_s = pad_2_zero_labels * (1 - mp_long) + masked_ids * mp_long
 
@@ -776,7 +639,7 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
                 else:
                     truth_log_probs = None
                 # print(log_probs.shape, masked_ids.shape)
-                if sample_num != 0 and self.config.sample_method == 'multi':
+                if sample_num != 0:
                     log_probs = log_probs * mp.float()
 
             loss = None
@@ -832,20 +695,18 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
             masked_pos_non_shift = masked_pos_non_shift.reshape(-1, 2, masked_pos_non_shift.shape[-1])
             ce_masked_pos_non_shift = masked_pos_non_shift[:, 0, :]
             masked_pos_non_shift = masked_pos_non_shift[:, 1, :]
-            non_masked_pos_shift = non_masked_pos_shift.reshape(-1, 2, non_masked_pos_shift.shape[-1])
-            ce_non_masked_pos_shift = non_masked_pos_shift[:, 0, :]
-            non_masked_pos_shift = non_masked_pos_shift[:, 1, :]
+
 
             res = [construct_return(lm_logits=ce_lm_logits, labels=ce_labels, bs=bs // 2,
-                                    non_masked_pos_shift=ce_non_masked_pos_shift, masked_pos_shift=ce_masked_pos_shift,
+                                    masked_pos_shift=ce_masked_pos_shift,
                                     masked_pos_non_shift=ce_masked_pos_non_shift, ce=True),
                    construct_return(lm_logits=lm_logits, labels=labels, bs=bs // 2,
-                                    non_masked_pos_shift=non_masked_pos_shift, masked_pos_shift=masked_pos_shift,
+                                    masked_pos_shift=masked_pos_shift,
                                     masked_pos_non_shift=masked_pos_non_shift),
 
                    ]
         else:
-            res = construct_return(lm_logits=lm_logits, labels=labels, bs=bs, non_masked_pos_shift=non_masked_pos_shift,
+            res = construct_return(lm_logits=lm_logits, labels=labels, bs=bs,
                                    masked_pos_shift=masked_pos_shift, masked_pos_non_shift=masked_pos_non_shift)
         return res
 
@@ -902,45 +763,6 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
            # return_dict = super().forward(**kwargs)
             return_dict = self.rl_forward(**kwargs)
             return return_dict
-    
-    @staticmethod
-    def _reorder_cache(past, beam_idx):
-        reordered_past = ()
-        for layer_past in past:
-            # cached cross_attention states don't have to be reordered -> they are always the same
-            reordered_past += (
-                tuple(past_state.index_select(0, beam_idx) for past_state in layer_past[:2]) + layer_past[2:],
-            )
-        return reordered_past
-
-    @staticmethod
-    def _expand_inputs_for_generation(
-        input_ids: torch.LongTensor,
-        expand_size: int = 1,
-        is_encoder_decoder: bool = False,
-        attention_mask: torch.LongTensor = None,
-        encoder_outputs: ModelOutput = None,
-        **model_kwargs,
-    ) -> Tuple[torch.LongTensor, Dict[str, Any]]:
-        expanded_return_idx = (
-            torch.arange(input_ids.shape[0]).view(-1, 1).repeat(1, expand_size).view(-1).to(input_ids.device)
-        )
-        input_ids = input_ids.index_select(0, expanded_return_idx)
-
-        #if "token_type_ids" in model_kwargs:
-        #    token_type_ids = model_kwargs["token_type_ids"]
-        #    model_kwargs["token_type_ids"] = token_type_ids.index_select(0, expanded_return_idx)
-
-        if attention_mask is not None:
-            model_kwargs["attention_mask"] = attention_mask.index_select(0, expanded_return_idx)
-
-        if is_encoder_decoder:
-            assert encoder_outputs is not None
-        #    encoder_outputs["last_hidden_state"] = encoder_outputs.last_hidden_state.index_select(
-        #        0, expanded_return_idx.to(encoder_outputs.last_hidden_state.device)
-        #    )
-            model_kwargs["encoder_outputs"] = encoder_outputs
-        return input_ids, model_kwargs
 from transformers.models.t5.configuration_t5 import T5Config
 from transformers.models.t5.modeling_t5 import T5Model
 
@@ -950,11 +772,8 @@ class CustomT5Model(T5Model):
         self.is_scoring_mode = False
     def scoring_mode(self):
         self.is_scoring_mode = True
-
     def generation_mode(self):
         self.is_scoring_mode = False
-
-
     def forward(
         self,
         input_ids=None,
@@ -998,7 +817,6 @@ class CustomT5Model(T5Model):
             if self.config.num_layers == self.config.num_decoder_layers:
                 warnings.warn(__HEAD_MASK_WARNING_MSG, FutureWarning)
                 decoder_head_mask = head_mask
-
         # Encode if needed (training, first prediction pass)
         if encoder_outputs is None:
             encoder_outputs = self.encoder(
@@ -1016,7 +834,6 @@ class CustomT5Model(T5Model):
                 hidden_states=encoder_outputs[1] if len(encoder_outputs) > 1 else None,
                 attentions=encoder_outputs[2] if len(encoder_outputs) > 2 else None,
             )
-
         # Decode
         if self.is_scoring_mode:
             cand_num = decoder_input_ids.size(1)
@@ -1028,7 +845,6 @@ class CustomT5Model(T5Model):
             # print(decoder_attention_mask)
         else:
             hidden_states = encoder_outputs[0]
-
         if self.model_parallel:
             torch.cuda.set_device(self.decoder.first_device)
         # Set device for model parallelism
@@ -1041,7 +857,6 @@ class CustomT5Model(T5Model):
                 attention_mask = attention_mask.to(self.decoder.first_device)
             if decoder_attention_mask is not None:
                 decoder_attention_mask = decoder_attention_mask.to(self.decoder.first_device)
-
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
             attention_mask=decoder_attention_mask,
@@ -1056,10 +871,8 @@ class CustomT5Model(T5Model):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
-
         if not return_dict:
             return decoder_outputs + encoder_outputs
-
         return Seq2SeqModelOutput(
             last_hidden_state=decoder_outputs.last_hidden_state,
             past_key_values=decoder_outputs.past_key_values,
