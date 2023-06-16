@@ -283,7 +283,6 @@ class PegasusForConditionalGeneration(PegasusForConditionalGeneration):
                             else:
                                 should_mask_pos[i][k] = 0
                             if self.config.cand_pos_remove_sp_tk and spmask:
-                                # . x  .后面的词不mask
                                 if self.config.nmask_comma:
                                     if (tmp_tks[i][k] == ',' or tmp_tks[i][k] == '.'):
                                         k += 1
