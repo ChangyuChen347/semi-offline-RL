@@ -220,9 +220,9 @@ class RL_env(nn.Module):
                 masked_ids,
                 input_ids,
                 labels,
-                non_zero_sum_tensor,
                 log_probs,
                 querys,
+                non_zero_sum_tensor=None,
                 not_normal_log_probs=None,
                 raw_src=None,
                 refs=None,):
@@ -314,9 +314,7 @@ class RL_env(nn.Module):
                 rl_loss = torch.bmm(not_normal_log_probs, all_reward_m).squeeze(2).sum(-1)  # bs, 1, n
                 rl_loss = -rl_loss.mean()
             else:
-                '''
-                default rl loss
-                '''
+                # default rl loss
                 rl_loss = torch.bmm(log_probs, all_reward_m).squeeze(2).sum(-1)  # bs, 1, n
                 rl_loss = -rl_loss.mean()
         else:
@@ -391,3 +389,15 @@ class RL_env(nn.Module):
     def get_reward_tensor(self, rouge_list):
         reward = torch.tensor(rouge_list, dtype=torch.float).cuda()
         return reward
+
+    def add_padding_(self, raw_txt, pad_id, max_len=256):
+        txts_ids = [self.tokenizer.encode(txt) for txt in raw_txt]
+        for t in txts_ids:
+            assert len(t) != 0
+        padding_txts_ids = []
+        batch_max_seq_len = max([len(txt) for txt in txts_ids])
+        batch_max_seq_len = min(batch_max_seq_len, max_len)
+        for txt_ids in txts_ids:
+            padding_txts_ids.append(
+                txt_ids[:batch_max_seq_len] + [pad_id] * (batch_max_seq_len - len(txt_ids[:batch_max_seq_len])))
+        return torch.tensor(padding_txts_ids, dtype=torch.long).cuda()

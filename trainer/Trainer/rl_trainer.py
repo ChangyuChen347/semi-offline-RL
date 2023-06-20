@@ -6,7 +6,8 @@ from numpy.lib.function_base import average, median
 import torch
 from torch.distributed.distributed_c10d import init_process_group
 # from transformers import Trainer
-from trainer import Trainer, MetricsCalculator, PrinterCallback, AmlLogger
+from trainer.Trainer.trainer import Trainer as BaseTrainer
+from trainer.Trainer.trainer import MetricsCalculator, PrinterCallback, AmlLogger
 from data.data_reader import CustomizeCollator
 from transformers.trainer_utils import speed_metrics
 import trainer.Metrics as Metrics
@@ -203,18 +204,23 @@ class HisStatisticInfo:
             logger.info(e)
 
 @register_trainer("rl")
-class Trainer(Trainer):
-    def __init__(self, model, args, model_args, task_args, train_dataset, eval_dataset, auto_tokenizer, pred_dataset):
-        data_collator = CustomizeCollator(train_dataset,eval_dataset,pred_dataset)
-        self.pred_dataset = pred_dataset.get_dataset() if pred_dataset else None
-        # resize embedding, will do nothing if `old_num_tokens==new_num_tokens`
-        model.resize_token_embeddings(len(auto_tokenizer))
+class Trainer(BaseTrainer):
+    def __init__(self, model, args, model_args, task_args, train_dataset, eval_dataset, auto_tokenizer):
+
+        super().__init__(
+            model=model,
+            args=args,
+            model_args=model_args,
+            task_args=task_args,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            auto_tokenizer=auto_tokenizer
+        )
+
         self.args = args
-
         self.tokenizer = auto_tokenizer
-
         self.rl_env = RL_env(
-            self.tokenizer,
+            auto_tokenizer,
             reward_type=self.args.reward_type,
             rewards=self.args.rewards,
             rouge_type=self.args.rouge_type,
@@ -224,69 +230,13 @@ class Trainer(Trainer):
             loss_type=self.args.loss_type,
             margin=self.args.margin
         )
-        if args.do_train:
-            if args.eval_metrics == "eval_loss":
-                metrics_calculator = None
-                args.metric_for_best_model = "eval_loss"
-            else:
-                #metrics_calculator = MetricsCalculator(args.eval_metrics, model_args._name_or_path, args, task_args) if args.eval_metrics else None
-                model_dict = {}
-                if 'fact' in self.args.rewards:
-                    model_dict['fact'] = self.rl_env.fact_model
-                metrics_calculator = MetricsCalculator(args.eval_metrics, model_args._name_or_path, args, task_args,
-                                                       auto_tokenizer, model_dict) if args.eval_metrics else None
-
-                args.metric_for_best_model = MetricsCalculator.cvt_mtc(args.eval_metrics.split(",")[0], False)
-        else:
-            metrics_calculator = None
-        if args.do_predict:
-
-            self.result_header = args.result_header.split(
-                ",") if "," in args.result_header else eval_dataset.feature_extractor.model_header
-
-            self.outputter = getattr(Outputter, args.output_type)(args, model_args._name_or_path,
-                                                                  tokenizer=auto_tokenizer)
-
-        if 'azure_ml' in args.report_to:
-            args.report_to.remove('azure_ml')
-
-        # adjust labels for both loss and metrics computation 
-        # in case there are multiple label components 
-        default_label_names = ["labels"]
-        args.label_names = args.label_names.split(",") if args.label_names else default_label_names
-
         if self.args.recover != "":
             model.load_state_dict(torch.load(args.recover))
-
-
-        if 'brio' in self.args.rewards:
-            self.rl_env.brio_model = copy.deepcopy(model)
-            self.rl_env.brio_model.cuda()
-            # self.rl_env.brio_model.load_state_dict(torch.load('brio_model'))
-
-        super().__init__(
-            model = model,
-            args = args,
-            train_dataset = train_dataset.get_dataset() if train_dataset else None,
-            eval_dataset = eval_dataset.get_dataset() if eval_dataset else None,
-            data_collator = data_collator,
-            compute_metrics = metrics_calculator
-            )
 
         if self.args.smooth > 0:
             self.smoother = LabelSmoother(epsilon=self.args.smooth)
         else:
             self.smoother = None
-
-        self.train_start_time = time.time()
-        self.model.tokenizer = auto_tokenizer
-        az_logger = AmlLogger()
-        if az_logger.active:
-            self.add_callback(AmlLogger)
-
-        self.lambda_for_vocab = None
-        self.lambda_for_vocab_lr = 1e-7
-        self.log_probs_constraint = 0
 
     def get_tks(self, y, tokenizer, process=True):
 
@@ -388,16 +338,13 @@ class Trainer(Trainer):
                         f"Transformers but your current version is {__version__}. This is not recommended and could "
                         "yield to errors or unwanted behaviors."
                     )
-            if args.deepspeed:
-                # will be resumed in deepspeed_init
-                pass
-            else:
-                # We load the model state dict on the CPU to avoid an OOM error.
-                state_dict = torch.load(os.path.join(resume_from_checkpoint, WEIGHTS_NAME), map_location="cpu")
-                # If the model is on the GPU, it still works!
-                self._load_state_dict_in_model(state_dict)
-                # release memory
-                del state_dict
+
+            # We load the model state dict on the CPU to avoid an OOM error.
+            state_dict = torch.load(os.path.join(resume_from_checkpoint, WEIGHTS_NAME), map_location="cpu")
+            # If the model is on the GPU, it still works!
+            self._load_state_dict_in_model(state_dict)
+            # release memory
+            del state_dict
 
         # If model was re-initialized, put it on the right device and update self.model_wrapped
         if model_reloaded:
@@ -452,16 +399,8 @@ class Trainer(Trainer):
                 debug_overflow = DebugUnderflowOverflow(self.model)  # noqa
 
         delay_optimizer_creation = self.sharded_ddp is not None and self.sharded_ddp != ShardedDDPOption.SIMPLE
-        if args.deepspeed:
-            deepspeed_engine, optimizer, lr_scheduler = deepspeed_init(
-                self, num_training_steps=max_steps, resume_from_checkpoint=resume_from_checkpoint
-            )
-            self.model = deepspeed_engine.module
-            self.model_wrapped = deepspeed_engine
-            self.deepspeed = deepspeed_engine
-            self.optimizer = optimizer
-            self.lr_scheduler = lr_scheduler
-        elif not delay_optimizer_creation:
+
+        if not delay_optimizer_creation:
             self.create_optimizer_and_scheduler(num_training_steps=max_steps)
 
         self.state = TrainerState()
@@ -486,7 +425,7 @@ class Trainer(Trainer):
 
         # important: at this point:
         # self.model         is the Transformers Model
-        # self.model_wrapped is DDP(Transformers Model), Deepspeed(Transformers Model), etc.
+        # self.model_wrapped is DDP(Transformers Model), etc.
 
         # Train!
         num_examples = (
@@ -630,9 +569,7 @@ class Trainer(Trainer):
 
                 self.current_flos += float(self.floating_point_ops(inputs))
 
-                # Optimizer step for deepspeed must be called on every step regardless of the value of gradient_accumulation_steps
-                if self.deepspeed:
-                    self.deepspeed.step()
+
                 print_every = args.print_every
                 save_every = args.save_every
                 output_dir = args.output_dir
@@ -655,8 +592,7 @@ class Trainer(Trainer):
                     and (step + 1) == steps_in_epoch
                 )):
                     # Gradient clipping
-                    if args.max_grad_norm is not None and args.max_grad_norm > 0 and not self.deepspeed:
-                        # deepspeed does its own clipping
+                    if args.max_grad_norm is not None and args.max_grad_norm > 0:
 
                         if self.use_amp:
                             # AMP: gradients need unscaling
@@ -677,9 +613,8 @@ class Trainer(Trainer):
 
                     # Optimizer step
                     optimizer_was_run = True
-                    if self.deepspeed:
-                        pass  # called outside the loop
-                    elif self.use_amp:
+
+                    if self.use_amp:
                         scale_before = self.scaler.get_scale()
                         self.scaler.step(self.optimizer)
                         self.scaler.update()
@@ -688,7 +623,7 @@ class Trainer(Trainer):
                     else:
 
                         self.optimizer.step()
-                    if optimizer_was_run and not self.deepspeed:
+                    if optimizer_was_run:
                         self.lr_scheduler.step()
 
                     model.zero_grad()
@@ -739,10 +674,7 @@ class Trainer(Trainer):
                     "on multiple nodes, you should activate `--save_on_each_node`."
                 )
 
-            if self.deepspeed:
-                self.deepspeed.load_checkpoint(
-                    self.state.best_model_checkpoint, load_optimizer_states=False, load_lr_scheduler_states=False
-                )
+
 
 
         self._total_loss_scalar += tr_loss.item()
@@ -795,31 +727,100 @@ class Trainer(Trainer):
         self.his_info.his_rl_loss.append(rl_loss.detach().clone().cpu().numpy())
         if self.args.n_gpu > 1:
             loss = loss.mean()  # mean() to average on multi-gpu parallel training
-        if self.args.gradient_accumulation_steps > 1 and not self.deepspeed:
-            # deepspeed handles loss scaling by gradient_accumulation_steps in its `backward`
+        if self.args.gradient_accumulation_steps > 1 :
             loss = loss / self.args.gradient_accumulation_steps
         if self.use_amp:
             self.scaler.scale(loss).backward()
         elif self.use_apex:
             with amp.scale_loss(loss, self.optimizer) as scaled_loss:
                 scaled_loss.backward()
-        elif self.deepspeed:
-            loss = self.deepspeed.backward(loss)
         else:
             loss.backward()
         return loss.detach() * self.args.gradient_accumulation_steps, ce_loss.detach(), greedy_reward
 
-    def add_padding_(self, raw_txt, pad_id):
-        txts_ids = [self.rl_env.tokenizer.encode(txt) for txt in raw_txt]
-        for t in txts_ids:
-            assert len(t) != 0
-        padding_txts_ids = []
-        batch_max_seq_len = max([len(txt) for txt in txts_ids])
-        batch_max_seq_len = min(batch_max_seq_len, 142)
-        for txt_ids in txts_ids:
-            padding_txts_ids.append(
-                txt_ids[:batch_max_seq_len] + [pad_id] * (batch_max_seq_len - len(txt_ids[:batch_max_seq_len])))
-        return torch.tensor(padding_txts_ids, dtype=torch.long).cuda()
+
+    def compute_acc_and_loss(self, max_ids, labels_, mp, log_probs_all):
+        '''
+         Calculateing accuracy and loss while generating n-gram related positional information.
+        '''
+        tot_cont = 0
+        dif_cont = 0
+        # acc max_ids -> labels
+        # loss sum of log_probs
+        masked_probs = log_probs_all.gather(2, max_ids.unsqueeze(2)).squeeze()
+        pred_acc = max_ids == labels_
+        batch_p_numpy = mp.clone().detach().cpu().numpy()
+        batch_2_gram_pos = []
+        batch_3_gram_pos = []
+        batch_4_gram_pos = []
+        batch_n_gram_pos = []
+        labels_np = labels_.cpu().clone().numpy()
+        for k, p_n in enumerate(batch_p_numpy):
+            cont_mask_num = 0
+            _2_gram_pos = [0] * len(labels_np[k])
+            _3_gram_pos = [0] * len(labels_np[k])
+            _4_gram_pos = [0] * len(labels_np[k])
+            _n_gram_pos = [0] * len(labels_np[k])
+            for i in range(0, len(p_n)):
+                if p_n[i] == 0:
+                    break
+                if i > 0 and p_n[i] == p_n[i - 1] + 1:
+                    cont_mask_num += 1
+                elif i == 0:  # 0 or not cont from last pos
+                    cont_mask_num = 1
+                else:
+                    cont_mask_num = 1
+                if labels_np[k][p_n[i] + 1] != -100:
+                    if cont_mask_num >= 1:
+                        _n_gram_pos[p_n[i] + 1] = 1
+                    if cont_mask_num == 1:
+                        _2_gram_pos[p_n[i] + 1] = 1
+                    if cont_mask_num == 2:
+                        _3_gram_pos[p_n[i] + 1] = 1
+                    if cont_mask_num == 3:
+                        _4_gram_pos[p_n[i] + 1] = 1
+            batch_2_gram_pos.append(_2_gram_pos)
+            batch_3_gram_pos.append(_3_gram_pos)
+            batch_4_gram_pos.append(_4_gram_pos)
+            batch_n_gram_pos.append(_n_gram_pos)
+        batch_2_gram_pos = torch.tensor(batch_2_gram_pos).long().cuda()
+        batch_3_gram_pos = torch.tensor(batch_3_gram_pos).long().cuda()
+        batch_4_gram_pos = torch.tensor(batch_4_gram_pos).long().cuda()
+        batch_n_gram_pos = torch.tensor(batch_n_gram_pos).long().cuda()
+        _2_gram_loss = -(masked_probs * batch_2_gram_pos).sum() / (batch_2_gram_pos.sum())
+        _3_gram_loss = -(masked_probs * batch_3_gram_pos).sum() / (batch_3_gram_pos.sum())
+        _4_gram_loss = -(masked_probs * batch_4_gram_pos).sum() / (batch_4_gram_pos.sum())
+        _2_gram_acc = (pred_acc * batch_2_gram_pos).sum() / (batch_2_gram_pos.sum())
+        _3_gram_acc = (pred_acc * batch_3_gram_pos).sum() / (batch_3_gram_pos.sum())
+        _4_gram_acc = (pred_acc * batch_4_gram_pos).sum() / (batch_4_gram_pos.sum())
+        if batch_2_gram_pos.sum() != 0:
+            self.his_info.his_2_gram_acc.append(_2_gram_acc.cpu())
+            self.his_info.his_2_gram_loss.append(_2_gram_loss.cpu())
+        if batch_3_gram_pos.sum() != 0:
+            self.his_info.his_3_gram_acc.append(_3_gram_acc.cpu())
+            self.his_info.his_3_gram_loss.append(_3_gram_loss.cpu())
+        if batch_4_gram_pos.sum() != 0:
+            self.his_info.his_4_gram_acc.append(_4_gram_acc.cpu())
+            self.his_info.his_4_gram_loss.append(_4_gram_loss.cpu())
+        return batch_2_gram_pos, batch_3_gram_pos, batch_4_gram_pos, batch_n_gram_pos
+
+
+    def compute_dif(self, y_b, mp):
+        '''
+         Calculateing the
+        '''
+        tot_cont = 0
+        dif_cont = 0
+        p_numpy = mp.clone().detach().cpu().numpy()
+        pre_output_ids = y_b.tolist()
+        for k, p_n in enumerate(p_numpy):
+            for i in range(len(p_n) - 1, -1, -1):
+                if i > 0 and p_n[i] == p_n[i - 1] + 1:
+                    tot_cont += 1
+                    if pre_output_ids[k][p_n[i]] != pre_output_ids[k][p_n[i - 1]]:
+                        dif_cont += 1
+        if tot_cont != 0:
+            self.his_info.his_dif_cont_rate.append(dif_cont / tot_cont)
 
     def compute_rl_loss(self, model, inputs, return_outputs=False):
         """
@@ -828,23 +829,12 @@ class Trainer(Trainer):
         Subclass and override for custom behavior.
         """
         if self.smoother is not None and "labels" in inputs:
-            #labels = inputs.pop("labels")
             labels = inputs['labels']
         else:
             labels = None
 
-        beams = 16
-        seq_num = 16
-        if self.args.seq_decode_model == 't5':
-            eos_token_id = 1
-            pad_token_id = 0
-        else:
-            if self.args.seq_decode_model == 'bart':
-                eos_token_id = 2  # bart pad = 1,
-                pad_token_id = 1  # bart pad = 1,
-            elif self.args.seq_decode_model == 'pegasus':
-                eos_token_id = 1
-                pad_token_id = 0
+        pad_token_id = self.rl_env.tokenizer.pad_token_id
+        eos_token_id = self.rl_env.tokenizer.eos_token_id
 
         inputs['attention_mask'] = ~inputs['input_ids'].eq(pad_token_id)
 
@@ -853,100 +843,8 @@ class Trainer(Trainer):
 
         ori_inputs = copy.deepcopy(inputs)
         q2 = inputs['q2']
-        if '<#QUERY#>' in q2[0]:
-            q2 = [e.split('<#QUERY#>')[0] for e in q2]
-
         inputs['not_seq_decode'] = True
-        if self.args.seq_decode_model == 't5':
-            eos_token_id = 1
-            pad_token_id = 0
-        elif self.args.seq_decode_model == 'pegasus':
-            eos_token_id = 1
-            pad_token_id = 0
-        elif self.args.seq_decode_model == 'bart':
-            eos_token_id = 2
-            pad_token_id = 1
         model.train()
-
-
-        '''
-        Calculateing accuracy and loss while generating n-gram related positional information.
-        '''
-        def compute_acc_and_loss(max_ids, labels_, mp, log_probs_all):
-            tot_cont = 0
-            dif_cont = 0
-            # acc max_ids -> labels
-            # loss sum of log_probs
-            masked_probs = log_probs_all.gather(2, max_ids.unsqueeze(2)).squeeze()
-            pred_acc = max_ids == labels_
-            batch_p_numpy = mp.clone().detach().cpu().numpy()
-            batch_2_gram_pos = []
-            batch_3_gram_pos = []
-            batch_4_gram_pos = []
-            batch_n_gram_pos = []
-            labels_np = labels_.cpu().clone().numpy()
-            for k, p_n in enumerate(batch_p_numpy):
-                cont_mask_num = 0
-                _2_gram_pos = [0] * len(labels_np[k])
-                _3_gram_pos = [0] * len(labels_np[k])
-                _4_gram_pos = [0] * len(labels_np[k])
-                _n_gram_pos = [0] * len(labels_np[k])
-                for i in range(0, len(p_n)):
-                    if p_n[i] == 0:
-                        break
-                    if i > 0 and p_n[i] == p_n[i - 1] + 1:
-                        cont_mask_num += 1
-                    elif i == 0: # 0 or not cont from last pos
-                        cont_mask_num = 1
-                    else:
-                        cont_mask_num = 1
-                    if labels_np[k][p_n[i]+1] != -100:
-                        if cont_mask_num >= 1:
-                            _n_gram_pos[p_n[i] + 1] = 1
-                        if cont_mask_num == 1:
-                            _2_gram_pos[p_n[i]+1] = 1
-                        if cont_mask_num == 2:
-                            _3_gram_pos[p_n[i]+1] = 1
-                        if cont_mask_num == 3:
-                            _4_gram_pos[p_n[i]+1] = 1
-                batch_2_gram_pos.append(_2_gram_pos)
-                batch_3_gram_pos.append(_3_gram_pos)
-                batch_4_gram_pos.append(_4_gram_pos)
-                batch_n_gram_pos.append(_n_gram_pos)
-            batch_2_gram_pos = torch.tensor(batch_2_gram_pos).long().cuda()
-            batch_3_gram_pos = torch.tensor(batch_3_gram_pos).long().cuda()
-            batch_4_gram_pos = torch.tensor(batch_4_gram_pos).long().cuda()
-            batch_n_gram_pos = torch.tensor(batch_n_gram_pos).long().cuda()
-            _2_gram_loss = -(masked_probs * batch_2_gram_pos).sum() / (batch_2_gram_pos.sum())
-            _3_gram_loss = -(masked_probs * batch_3_gram_pos).sum()/(batch_3_gram_pos.sum())
-            _4_gram_loss = -(masked_probs * batch_4_gram_pos).sum()/(batch_4_gram_pos.sum())
-            _2_gram_acc = (pred_acc * batch_2_gram_pos).sum() / (batch_2_gram_pos.sum())
-            _3_gram_acc = (pred_acc * batch_3_gram_pos).sum() / (batch_3_gram_pos.sum())
-            _4_gram_acc = (pred_acc * batch_4_gram_pos).sum() / (batch_4_gram_pos.sum())
-            if batch_2_gram_pos.sum() != 0:
-                self.his_info.his_2_gram_acc.append(_2_gram_acc.cpu())
-                self.his_info.his_2_gram_loss.append(_2_gram_loss.cpu())
-            if batch_3_gram_pos.sum() != 0:
-                self.his_info.his_3_gram_acc.append(_3_gram_acc.cpu())
-                self.his_info.his_3_gram_loss.append(_3_gram_loss.cpu())
-            if batch_4_gram_pos.sum() != 0:
-                self.his_info.his_4_gram_acc.append(_4_gram_acc.cpu())
-                self.his_info.his_4_gram_loss.append(_4_gram_loss.cpu())
-            return batch_2_gram_pos, batch_3_gram_pos, batch_4_gram_pos, batch_n_gram_pos
-
-        def compute_dif(y_b, mp):
-            tot_cont = 0
-            dif_cont = 0
-            p_numpy = mp.clone().detach().cpu().numpy()
-            pre_output_ids = y_b.tolist()
-            for k, p_n in enumerate(p_numpy):
-                for i in range(len(p_n) - 1, -1, -1):
-                    if i > 0 and p_n[i] == p_n[i - 1] + 1:
-                        tot_cont += 1
-                        if pre_output_ids[k][p_n[i]] != pre_output_ids[k][p_n[i - 1]]:
-                            dif_cont += 1
-            if tot_cont != 0:
-                self.his_info.his_dif_cont_rate.append(dif_cont / tot_cont)
 
         not_normal_log_probs = None
         # <#REFS#> is only for SQuAD
@@ -957,9 +855,8 @@ class Trainer(Trainer):
         else:
             refs = None
 
-        '''
-        choose the static data: data+/data-/groundtruth
-        '''
+
+        # choose the static data: data+/data-/groundtruth
         if '<#QUERY#>' in inputs['q2'][0]:
             tmp_q2 = [t.split('<#QUERY#>')[1] for t in inputs['q2']]
         else:
@@ -971,34 +868,22 @@ class Trainer(Trainer):
         if self.args.cand_num == 1 and self.args.kd_inputs_worst:
             cands = [t for e in tmp_q2 for t in random.sample(e.split('<#SEP#>')[-1:], self.args.cand_num)]
         cands = [t.split('<#SCORE#>')[0] for t in cands]
-        cands = self.add_padding_(cands, pad_id=-100)
+        cands = self.rl_env.add_padding_(cands, pad_id=-100, max_len=256)
         if self.args.seq_decode_model == 'bart':
             cands = cands[:, 1:]
         kd_seq_labels = cands
         kd_inputs = copy.deepcopy(inputs)
-        if self.args.cand_num != 1:
-            bs = kd_inputs['input_ids'].shape[0]
-            kd_inputs['labels'] = kd_inputs['labels'].unsqueeze(2).repeat(1, self.args.cand_num,
-                                                                                          1).reshape(
-                bs * self.args.cand_num, -1)
-            kd_inputs['query'] = [e for e in kd_inputs['query'] for _ in range(self.args.cand_num)]
-            kd_inputs['q2'] = [e for e in kd_inputs['q2'] for _ in range(self.args.cand_num)]
-            kd_inputs['doc'] = [e for e in kd_inputs['doc'] for _ in range(self.args.cand_num)]
-        if self.args.not_replace_kd:
+        assert self.args.cand_num == 1
+        if self.args.not_replace_kd: # use the original ground truth
             second_kd_inputs_labels = kd_inputs['labels']
         else:
             kd_inputs['labels'] = kd_seq_labels
             second_kd_inputs_labels = kd_inputs['labels']
 
 
-        if self.args.seq_decode_model == 't5':
-            model.scoring_mode()
-        elif self.args.seq_decode_model == 'bart':
-            model.model.scoring_mode()
-        elif self.args.seq_decode_model == 'pegasus':
-            model.model.scoring_mode()
+        model.sharing_encoder(True) # sharing encoder for computing mle loss and rl loss since the src is the same like BRIO (https://github.com/yixinL7/BRIO)
 
-        # stack inputs for computing mle (g_res) and rl (s_res)
+        # stack decoder inputs for computing mle (g_res) and rl (s_res)
         batch_size = inputs['labels'].shape[0]
         s_res = kd_inputs['labels'].reshape(batch_size, 1, -1)
         g_res = inputs['labels'].reshape(batch_size, 1, -1)
@@ -1017,57 +902,41 @@ class Trainer(Trainer):
 
         batch_size = second_kd_inputs_labels.shape[0]
         second_kd_inputs_labels = second_kd_inputs_labels.reshape(batch_size, -1)
-        model.train()
 
         try:
-            start = time.time()
+            model.train()
             merge_model_return_dict = model(**kd_inputs)
         except ValueError as e:
             print(e)
             return (torch.tensor(0).cuda(), None, 0, {'error':1})
 
         model_return_dict, kd_model_return_dict = merge_model_return_dict
-        outputs, y_b, y_s, max_ids, masked_ids, \
-            input_ids, labels_, non_zero_sum_tensor, \
-            log_probs, y_zero_b, y_zero_s, y_zero_labels, \
-            truth_log_probs, log_probs_all, lm_logits = model_return_dict[
-                                                                                                                                                                                       :15]
-        compute_acc_and_loss(
-            max_ids, labels_, model_return_dict[17], log_probs_all)
+        # output of mle
+        outputs, y_b, _, max_ids, _, _, labels_, log_probs, log_probs_all,\
+             _, masked_pos_shift, masked_pos_non_shift, \
+            decoder_input_ids = model_return_dict[:14]
 
-        model.train()
-        _, y_b, y_s, max_ids, masked_ids, input_ids, _, \
-            non_zero_sum_tensor, log_probs, y_zero_b, \
-            y_zero_s, y_zero_labels, \
-            truth_log_probs, log_probs_all, _ = kd_model_return_dict[:15]
+        # training metric of mle: if it predicts the next tokens correctly
+        self.compute_acc_and_loss(
+            max_ids, labels_, masked_pos_non_shift, log_probs_all)
 
-        mask_labels, masked_pos_shift, masked_pos_non_shift, decoder_input_ids = kd_model_return_dict[15:19]
-        compute_dif(y_b, masked_pos_non_shift)
+        # output of rl
+        _, y_b, y_s, max_ids, masked_ids, input_ids, _, log_probs = kd_model_return_dict[:8]
+
+        # training metric of rl: check the repetition of continuous masking
+        self.compute_dif(y_b, masked_pos_non_shift)
 
         length_penalty = self.args.training_length_penalty
 
+
+        # post process the mask and normalize the logprobs by the number of masked positions and samples
         if (model.config.sample_num != 0 or self.args.cand_num !=1):
             cand_mask = ~log_probs.data.eq(0)
-            '''
-            mask the corresponding logprob if the sampled token is a special token
-            '''
-            if self.args.seq_decode_model == 'bart':
-                new_cand_mask = cand_mask & ~(
-                        (y_s != eos_token_id) & (y_s != 0) & (
-                        y_s != pad_token_id))
-                cand_mask = cand_mask & (y_s != eos_token_id) & (
-                        y_s != 0) & (y_s != pad_token_id)
-                batch_size = labels_.shape[0]
-            elif self.args.seq_decode_model == 't5' and self.model.config.tokenizer_name == 't5-small':
-                new_cand_mask = cand_mask & ~((y_s != eos_token_id) & (y_s != pad_token_id))
-                cand_mask = cand_mask  & (y_s != eos_token_id) & (y_s != pad_token_id)
-            elif self.args.seq_decode_model == 'pegasus':
-                new_cand_mask = cand_mask & ~((y_s != eos_token_id) & (y_s != pad_token_id))
-                cand_mask = cand_mask & (y_s != eos_token_id) & (y_s != pad_token_id)
+            # mask the corresponding logprob if the sampled token is a special token
+            new_cand_mask = cand_mask & ~((y_s != eos_token_id) & (y_s != pad_token_id))
+            cand_mask = cand_mask & (y_s != eos_token_id) & (y_s != pad_token_id)
 
-            '''
-            mask the same position for all samples if the sampled token is a special token
-            '''
+            # mask the same position for all samples if the sampled token is a special token
             cand_mask = cand_mask.reshape(batch_size, -1, cand_mask.shape[-1])
             cand_num = cand_mask.shape[1]
             cand_mask = cand_mask.sum(1)
@@ -1087,13 +956,17 @@ class Trainer(Trainer):
             not_normal_log_probs = log_probs.clone()
             for_count_y_s = y_s * cand_mask + torch.ones_like(y_s).long().cuda() * -1 * ~cand_mask
             for_count_y_s = for_count_y_s.cpu().numpy()
+
+            # normalizing
             cand_mask = 1 / (((cand_mask.sum(-1)) ** length_penalty).unsqueeze(1))
             cand_mask = torch.where(torch.isinf(cand_mask), torch.full_like(cand_mask, 0), cand_mask)
             if self.args.length_normalize_4_rl:
                 log_probs = log_probs * cand_mask
                 log_probs = log_probs / (model.config.sample_num + 1) / self.args.cand_num
-        start = time.time()
+
         rl_loss = 0
+        greedy_reward_dict = {}
+        # compute the rl loss and record the token-wise reward
         if self.model.config.do_rl:
             np.random.seed(self.state.global_step)
             rl_loss, \
@@ -1107,9 +980,9 @@ class Trainer(Trainer):
                                     masked_ids,
                                     input_ids,
                                     labels_,
-                                    non_zero_sum_tensor,
                                     log_probs,
                                     q2,
+                                    non_zero_sum_tensor=None,
                                     not_normal_log_probs=not_normal_log_probs,
                                     raw_src=inputs['query'],
                                     refs=refs,
@@ -1130,7 +1003,7 @@ class Trainer(Trainer):
                 else:
                     self.his_info.reward_dist_dict[tk].append(reward_dist_dict[tk])
 
-            greedy_reward_dict = {}
+
             greedy_reward_tensor = greedy_reward_tensor.transpose(0, 1)
             for i, name in enumerate(self.args.rewards.split(',')):
                 greedy_reward_dict[name] = greedy_reward_tensor[i].float().mean().detach().cpu().numpy()
@@ -1141,12 +1014,9 @@ class Trainer(Trainer):
             if self.args.past_index >= 0:
                 self._past = outputs[self.args.past_index]
 
-        if self.args.seq_decode_model == 't5':
-            model.generation_mode()
-        elif self.args.seq_decode_model == 'bart':
-            model.model.generation_mode()
-        elif self.args.seq_decode_model == 'pegasus':
-            model.model.generation_mode()
+
+
+        model.sharing_encoder(False)
 
         if self.smoother is not None and labels_ is not None:
             loss = self.smoother(outputs, labels_)

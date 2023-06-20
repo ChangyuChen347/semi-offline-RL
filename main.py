@@ -27,8 +27,6 @@ def main():
     train_input, eval_input, predict_input = input_builder(model_args._name_or_path, train_args, task_args,
                                                            auto_tokenizer)
 
-    predict_input = None
-    print(train_args.task) #seq2seq
     if hasattr(task_args, 'auto_model'):
         print(task_args.auto_model) #transformers.models.auto.modeling_auto.AutoModelForSeq2SeqLM
     else:
@@ -50,42 +48,25 @@ def main():
         **kwargs
         )
 
-    print(train_args.trainer)
-    print(getattr(Trainer, train_args.trainer))
-    #assert 1==0
-
     trainer = getattr(Trainer, train_args.trainer)(
         model=model,
         args = train_args,
         model_args = model_args,
         train_dataset = train_input,
         eval_dataset = eval_input if not train_args.do_predict else predict_input,
-        pred_dataset = predict_input,
         task_args = task_args,
         auto_tokenizer=auto_tokenizer
     )
 
-    # predict_input = predict_input.get_dataset()
-    # predict_input = trainer.get_train_dataloader(predict_input)
-    # for t in predict_input:
-    #     print(t.keys())
-    # train_input = train_input.get_dataset()
-    # train_input = trainer.get_test_dataloader(train_input)
-    # for t in train_input:
-    #     print(t.keys())
-    print(train_args.max_length)
-    print(task_args.max_length)
     if train_args.do_train:
         trainer.train()
-
-        trainer.save_model(train_args.output_dir)
     if train_args.do_predict:
         trainer.predict()
 
 
 
 if __name__ == "__main__":
-    #os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
+    #os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     logger.info("checking GPU")
     if not torch.cuda.is_available():
         logger.warning("torch.cuda.is_available() Fail")

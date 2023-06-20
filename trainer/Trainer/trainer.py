@@ -18,7 +18,7 @@ from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.dataset import Dataset, IterableDataset
 from transformers.file_utils import is_datasets_available
 from transformers.trainer_pt_utils import IterableDatasetShard, LabelSmoother
-from transformers.trainer_utils import TrainOutput
+from transformers.trainer_utils import TrainOutput, EvalLoopOutput
 from data.tokenizer_utils import *
 from torch import nn
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
@@ -26,7 +26,27 @@ import math
 import torch.distributed as dist
 import matplotlib.pyplot as plt 
 from trainer.Trainer import register_trainer
-
+from transformers.trainer_pt_utils import (
+    DistributedLengthGroupedSampler,
+    DistributedSamplerWithLoop,
+    DistributedTensorGatherer,
+    IterableDatasetShard,
+    LabelSmoother,
+    LengthGroupedSampler,
+    SequentialDistributedSampler,
+    ShardSampler,
+    distributed_broadcast_scalars,
+    distributed_concat,
+    find_batch_size,
+    get_parameter_names,
+    nested_concat,
+    nested_detach,
+    nested_numpify,
+    nested_truncate,
+    nested_xla_mesh_reduce,
+    reissue_pt_warnings,
+)
+import collections
 if is_datasets_available():
     import datasets
 logger = logging.get_logger(__name__)
@@ -37,35 +57,25 @@ from transformers.integrations import AzureMLCallback
 class Trainer(Trainer):
     def __init__(self, model, args, model_args, task_args, train_dataset, eval_dataset, auto_tokenizer):
         data_collator = CustomizeCollator(train_dataset,eval_dataset)
-        #auto_tokenizer = prepare_tokenizer(model_args._name_or_path, args.cache_dir, special_tokens=args.special_tokens)
-        # resize embedding, will do nothing if `old_num_tokens==new_num_tokens`
         model.resize_token_embeddings(len(auto_tokenizer))
-        print('2')
-
         if args.do_train:
             if args.eval_metrics == "eval_loss":
                 metrics_calculator = None
                 args.metric_for_best_model = "eval_loss"
             else:
-                #metrics_calculator = MetricsCalculator(args.eval_metrics, model_args._name_or_path, args, task_args) if args.eval_metrics else None
+                model_dict = {}
                 metrics_calculator = MetricsCalculator(args.eval_metrics, model_args._name_or_path, args, task_args,
-                                                       auto_tokenizer) if args.eval_metrics else None
+                                                       auto_tokenizer, model_dict) if args.eval_metrics else None
 
                 args.metric_for_best_model = MetricsCalculator.cvt_mtc(args.eval_metrics.split(",")[0], False)
         else:
             metrics_calculator = None
         if args.do_predict:
-            print(args.result_header) #query
             self.result_header = args.result_header.split(
                 ",") if "," in args.result_header else eval_dataset.feature_extractor.model_header
-            print(self.result_header) #query:doc:
-            #assert 1 == 0
-            #self.outputter = getattr(Outputter,args.output_type)(args,model_args._name_or_path)
+
             self.outputter = getattr(Outputter, args.output_type)(args, model_args._name_or_path,
                                                                   tokenizer=auto_tokenizer)
-            print(args.output_type) #generation
-            print(self.outputter)
-            #assert 1==0
 
         if 'azure_ml' in args.report_to:
             args.report_to.remove('azure_ml')
@@ -119,8 +129,7 @@ class Trainer(Trainer):
         return outputter.realtime_output(features,logits)
 
         def predict(self, description="Inference"):
-            test_dataset = self.eval_dataset  # self.eval_dataset.get_dataset()['train']
-            #        self._memory_tracker.start()
+            test_dataset = self.eval_dataset
             dataloader = self.get_test_dataloader(test_dataset)
             start_time = time.time()
             model = self._wrap_model(self.model, training=False)
@@ -133,7 +142,6 @@ class Trainer(Trainer):
             logger.info(f"  Batch size = {batch_size}")
             model.eval()
             with torch.profiler.profile(
-                    # activities=[torch.profiler.ProfilerActivity.CUDA],
                     schedule=torch.profiler.schedule(
                         wait=2,
                         warmup=2,
@@ -187,7 +195,6 @@ class Trainer(Trainer):
         if self.control.should_evaluate:
             self.model.config.decoding_method = 'seq'
             metrics = self.evaluate()
-            # metrics = self.evaluate(self.pred_dataset)
             num_samples = self.args.per_device_train_batch_size * self.args.world_size * self.state.global_step
             metrics["eval_num_samples_consumed"] = num_samples
             self._report_to_hp_search(trial, epoch, metrics)
@@ -209,19 +216,7 @@ class Trainer(Trainer):
             prediction_loss_only if prediction_loss_only is not None else self.args.prediction_loss_only
         )
 
-        # if eval is called w/o train init deepspeed here
-        if self.args.deepspeed and not self.deepspeed:
-            # XXX: eval doesn't have `resume_from_checkpoint` arg but we should be able to do eval
-            # from the checkpoint eventually
-            deepspeed_engine, _, _ = deepspeed_init(self, num_training_steps=0, resume_from_checkpoint=None)
-            self.model = deepspeed_engine.module
-            self.model_wrapped = deepspeed_engine
-            self.deepspeed = deepspeed_engine
-            # XXX: we don't need optim/sched for inference, but this needs to be sorted out, since
-            # for example the Z3-optimizer is a must for zero3 to work even for inference - what we
-            # don't need is the deepspeed basic optimizer which is self.optimizer.optimizer
-            deepspeed_engine.optimizer.optimizer = None
-            deepspeed_engine.lr_scheduler = None
+
         model = self._wrap_model(self.model, training=False)
         # if full fp16 is wanted on eval and this ``evaluation`` or ``predict`` isn't called while
         # ``train`` is running, halve it first and then put on device
@@ -349,8 +344,6 @@ class Trainer(Trainer):
 
         # Metrics!
         if self.compute_metrics is not None and all_preds is not None and all_labels is not None:
-            #metrics = self.compute_metrics(EvalPrediction(predictions=all_preds, label_ids=all_labels))
-
             metrics = self.compute_metrics(EvalPrediction(predictions=all_preds, label_ids=all_labels, q2_ids=all_q2s, raw_src=all_raw_src, raw_src_origin=all_raw_src_origin))
         else:
             metrics = {}
@@ -369,68 +362,129 @@ class Trainer(Trainer):
         return EvalLoopOutput(predictions=all_preds, label_ids=all_labels, metrics=metrics, num_samples=num_samples)
 
 
-
-
 class MetricsCalculator:
-    def __init__(self, metrics, model_name, cfgs, task_cfgs, tokenizer):
+    def __init__(self, metrics, model_name, cfgs, task_cfgs, tokenizer, model_dict):
         self.metrs = {}
         for m in metrics.split(","):
             _m = self.cvt_mtc(m, True)
-            self.metrs[_m] = getattr(Metrics,_m)(model_name=model_name, cfg=cfgs, customize_cfg=task_cfgs)
-            self.metrs[_m] = getattr(Metrics, _m)(model_name=model_name, cfg=cfgs, customize_cfg=task_cfgs, tokenizer=tokenizer)
+            # self.metrs[_m] = getattr(Metrics,_m)(model_name=model_name, cfg=cfgs, customize_cfg=task_cfgs)
+            print(_m)
+            self.metrs[_m] = getattr(Metrics, _m)(model_name=model_name, cfg=cfgs, customize_cfg=task_cfgs,
+                                                  tokenizer=tokenizer, model_dict=model_dict)
 
-    def __call__(self,EvalPred):
+    def __call__(self, EvalPred):
         res = {}
         for m in self.metrs:
             res[m] = self.metrs[m](EvalPred)
-        
+
         res = self.flat_mtrcs(res)
-        return res 
+        return res
 
     @classmethod
-    def cvt_mtc(cls, mtr_name: str, is_root: bool) : 
+    def cvt_mtc(cls, mtr_name: str, is_root: bool):
         """
         convert user-defined metric of form "root_metric:node_metric"
-        based on scenarios needs. Normally, root metric is used to init the 
-        metric class while node metric is inherited from the root metric but 
+        based on scenarios needs. Normally, root metric is used to init the
+        metric class while node metric is inherited from the root metric but
         used in the evaluation with a fine-grained name.
         """
-        _mtr = mtr_name 
-        if ":" in _mtr : 
-            if is_root : 
+        _mtr = mtr_name
+        if ":" in _mtr:
+            if is_root:
                 _mtr = _mtr.split(":")[0]
-            else : 
+            else:
                 _mtr = "_".join(_mtr.split(":"))
 
-        return _mtr 
-            
+        return _mtr
 
-
-    def flat_mtrcs(self, res, prefix="") : 
+    def flat_mtrcs(self, res, prefix=""):
         """
-        Flatten recursively each metric if available and replace the metric in 
-        res with a hierachical name. This is most useful for multiple sub-metrics 
-        in one metric root category. An alternative is to split metric class 
-        for different sub-metrics, which could also be efficient, depending on 
+        Flatten recursively each metric if available and replace the metric in
+        res with a hierachical name. This is most useful for multiple sub-metrics
+        in one metric root category. An alternative is to split metric class
+        for different sub-metrics, which could also be efficient, depending on
         the repeated implementation.
 
-        Example: 
+        Example:
             replace `{"AUC" : {"overall": 1, "category": 2}}` to `{"AUC_overall" : 1, "AUC_category": 2}`
-        
+
         """
         _res = dict()
-        for res_key in res: 
-            if isinstance(res[res_key], dict) : 
+        for res_key in res:
+            if isinstance(res[res_key], dict):
                 node_level = str(prefix) + "_" + str(res_key) if prefix else res_key
                 _mtr = res[res_key]
                 _res.update(self.flat_mtrcs(_mtr, node_level))
-            else : 
-                if prefix : 
+            else:
+                if prefix:
                     _res[str(prefix) + "_" + str(res_key)] = res[res_key]
-                else : 
+                else:
                     _res[res_key] = res[res_key]
 
         return _res
+
+
+
+# class MetricsCalculator:
+#     def __init__(self, metrics, model_name, cfgs, task_cfgs, tokenizer):
+#         self.metrs = {}
+#         for m in metrics.split(","):
+#             _m = self.cvt_mtc(m, True)
+#             self.metrs[_m] = getattr(Metrics,_m)(model_name=model_name, cfg=cfgs, customize_cfg=task_cfgs)
+#             self.metrs[_m] = getattr(Metrics, _m)(model_name=model_name, cfg=cfgs, customize_cfg=task_cfgs, tokenizer=tokenizer)
+#
+#     def __call__(self,EvalPred):
+#         res = {}
+#         for m in self.metrs:
+#             res[m] = self.metrs[m](EvalPred)
+#
+#         res = self.flat_mtrcs(res)
+#         return res
+#
+#     @classmethod
+#     def cvt_mtc(cls, mtr_name: str, is_root: bool) :
+#         """
+#         convert user-defined metric of form "root_metric:node_metric"
+#         based on scenarios needs. Normally, root metric is used to init the
+#         metric class while node metric is inherited from the root metric but
+#         used in the evaluation with a fine-grained name.
+#         """
+#         _mtr = mtr_name
+#         if ":" in _mtr :
+#             if is_root :
+#                 _mtr = _mtr.split(":")[0]
+#             else :
+#                 _mtr = "_".join(_mtr.split(":"))
+#
+#         return _mtr
+#
+#
+#
+#     def flat_mtrcs(self, res, prefix="") :
+#         """
+#         Flatten recursively each metric if available and replace the metric in
+#         res with a hierachical name. This is most useful for multiple sub-metrics
+#         in one metric root category. An alternative is to split metric class
+#         for different sub-metrics, which could also be efficient, depending on
+#         the repeated implementation.
+#
+#         Example:
+#             replace `{"AUC" : {"overall": 1, "category": 2}}` to `{"AUC_overall" : 1, "AUC_category": 2}`
+#
+#         """
+#         _res = dict()
+#         for res_key in res:
+#             if isinstance(res[res_key], dict) :
+#                 node_level = str(prefix) + "_" + str(res_key) if prefix else res_key
+#                 _mtr = res[res_key]
+#                 _res.update(self.flat_mtrcs(_mtr, node_level))
+#             else :
+#                 if prefix :
+#                     _res[str(prefix) + "_" + str(res_key)] = res[res_key]
+#                 else :
+#                     _res[res_key] = res[res_key]
+#
+#         return _res
 
 @replace(PrinterCallback)
 class PrinterCallback(TrainerCallback):

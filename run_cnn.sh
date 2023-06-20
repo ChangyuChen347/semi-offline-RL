@@ -31,7 +31,7 @@ CUDA_VISIBLE_DEVICES=2 python main.py \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 8 \
     --exp_name demo \
-    --eval_steps 10 \
+    --eval_steps 1 \
     --rl_weight 40 \
     --sample_num 31 \
     --mask_rate 0.7 \

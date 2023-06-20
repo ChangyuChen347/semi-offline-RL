@@ -11,25 +11,24 @@ pip install -r requirement.txt
 ### Train
 ```console
 bash run_cnn.sh
-
 ```
 
 ### Evaluate
-The evaluation of CNN/DM and XSum is following [BRIO](https://github.com/yixinL7/BRIO). The evaluation 
+The evaluation (word tokenization and metric computation) of CNN/DM and XSum is following [BRIO](https://github.com/yixinL7/BRIO) and the evaluation of SQuAD is following [LMQG](https://github.com/asahi417/lm-question-generation).  
 ### Checkpoints and static datasets
-|        | BASE (M-FT) | RL | dataset |
-|--------|-------------|----|---------|
-| CNN/DM | [BART]()    |    |         |
-| SAMSum | [BART]()    |    |         |
-| SQuAD  | [T5]()      |    |         |
-| XSum   | [PEGASUS]() |    |         |
+|        | BASE (M-FT)                 | RL                        | 
+|--------|-----------------------------|---------------------------|
+| CNN/DM | [cnndm_bart_base_model]()   | [cnndm_bart_rl_model]()   | 
+| SAMSum | [samsum_bart_base_model]()  | [samsum_bart_rl_model]()  |  
+| SQuAD  | [t5_squad_base_model]()     | [t5_squad_rl_model]()     |   
+| XSum   | [xsum_pegasus_base_model]() | [xsum_pegasus_rl_model]() |  
 
-|        | Train       | validation | Test |
-|--------|-------------|------------|------|
-| CNN/DM | [BART]()    |            |      |
-| SAMSum | [BART]()    |            |      |
-| SQuAD  | [T5]()      |            |      |
-| XSum   | [PEGASUS]() |            |      |
+|        | Train                | validation         | Test                |
+|--------|----------------------|--------------------|---------------------|
+| CNN/DM | [cnn_train.tsv]()    | [cnn_val.tsv]()    | [cnn_test.tsv]()    |
+| SAMSum | [samsum_train.tsv]() | [samsum_val.tsv]() | [samsum_test.tsv]() |
+| SQuAD  | [squad_train.tsv]()  | [squad_val.tsv]()  | [squad_test.tsv]()  |
+| XSum   | [xsum_train.tsv]()   | [xsum_val.tsv]()   | [xsum_test.tsv]()   |
 
 ### The format of the dataset
 
