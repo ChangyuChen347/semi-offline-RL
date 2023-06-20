@@ -58,11 +58,6 @@ class InputPipe:
     def __init__(self, model, train_args, task_args, mode, auto_tokenizer):
         self.input_header = getattr(train_args, mode + "_header")
         self.model_header = getattr(train_args, mode + "_model_header")
-        #print("\033[0;37;41m\t{}\033[0m".format(self.input_header))
-        #print("\033[0;37;41m\t{}\033[0m".format(self.model_header))
-        #print(self.input_header) #query,doc
-        #print(self.model_header) #s2s_tokenize:query:doc:input,doc
-        #assert 1==0
         self.train_args = train_args
         self.task_args = task_args
         self.mode = mode
@@ -71,22 +66,15 @@ class InputPipe:
         self.workers = self.train_args.dataloader_num_workers if self.train_args.dataloader_num_workers else 1
         mode_identifier = "train" if mode == "train" else "eval"
         self.input_files = self.get_filenames(getattr(train_args,mode_identifier + "_dir"))
-        # print(mode_identifier)
+
         print(self.input_files)
-        # assert 1==0
+
         if train_args.datareader_streaming:
             self.ds = IterDataSet(self.input_files,mode_identifier)
         else: #Default
             # import `DataBuilder` (with `BuilderConfig`) from 'text' module to load dataset
-            # print(self.input_files)
-            # print({mode_identifier:Value("string")})
-            # assert 1==0
-            #print("\033[0;37;41m\t{}\033[0m".format(Features({mode_identifier:Value("string")})))
+
             self.ds = datasets.load_dataset('text',data_files=self.input_files,encoding='utf-8',features=Features({mode_identifier:Value("string")}))["train"]
-        #self.ds = self.ds.map(lambda x: {mode_identifier:x["text"]},batched=False,remove_columns=["text"])
-        #print("\033[0;37;41m\t{}{}\033[0m".format('self.model_header', self.model_header))
-        #assert 1 == 0
-        #self.feature_extractor = FeatureExtractor(self.input_header, self.model_header, self.model, self.train_args, self.task_args)
         self.feature_extractor = FeatureExtractor(self.input_header, self.model_header, self.model, self.train_args,
                                                   self.task_args, auto_tokenizer)
     def get_dataset(self):
@@ -118,8 +106,6 @@ class FeatureExtractor():
     def __init__(self, input_header, model_header, model, train_args, task_args, auto_tokenizer):
         self.input_header = dict((h,i) for i,h in enumerate(input_header.split(",")))
         self.model_header = model_header.split(",")
-        # self.model_header = ['s2s_tokenize:query:input', 'query', 'doc']
-        # self.input_header = {'query': 0, 'doc': 1}
         self.model = model
         self.train_args = train_args
         self.task_args = task_args
@@ -136,25 +122,17 @@ class FeatureExtractor():
     
     def init_proc(self):
         """ initialize line processor, e.g, tokenizer processor """
-        # print(self.model_header)
-        # assert 1==0
         for mh in self.model_header:
             cols = mh.split(":")
             print("\033[0;37;41m\t{}{}\033[0m".format('model_header', self.model_header))
             print("\033[0;37;41m\t{}{}\033[0m".format('mh', mh))
             print("\033[0;37;41m\t{}{}\033[0m".format('cols', cols))
             out_name = cols[-1]
-            print(self.preprocess)
-            print(out_name)
             if out_name in self.processors:
                 raise ValueError(f"processor for out_name={out_name} is already registered with Processor {self.processors[out_name]}")
             if len(cols) == 1:
-                print('1')
                 cls = getattr(Processor,'basic')
-                #print(out_name,self.input_header[out_name])
-                print(self.input_header[out_name])
                 self.processors[out_name] = cls(self.input_header[out_name],out_name)
-                print(self.processors[out_name])
             elif len(cols) == 2:
                 cls = getattr(Processor,cols[0])
                 self.processors[out_name] = cls(self.input_header[out_name],out_name)
@@ -162,7 +140,6 @@ class FeatureExtractor():
                 # out_name : input / doc 
                 cls = getattr(Processor, cols[0])
                 feat_idx = [self.input_header[x] for x in cols[1:-1]]
-                #self.processors[out_name] = cls(idx=feat_idx, out_name=out_name, model=self.model, cfg=self.train_args, task_cfg=self.task_args)
                 self.processors[out_name] = cls(idx=feat_idx, out_name=out_name, model=self.model, cfg=self.train_args,
                                                 task_cfg=self.task_args, tokenizer=self.tokenizer)
     def preprocess(self,line):
@@ -172,7 +149,7 @@ class FeatureExtractor():
         elif not isinstance(line,str):
             line = line.decode('utf-8')
         column = line.strip("\n").split("\t")
-        #print(column
+
         if len(column) != 3:
             print(line)
         res = dict()
@@ -182,7 +159,7 @@ class FeatureExtractor():
                 return None
             res.update(tmp)
 
-        #assert 1==0
+
         return res
     
     def set_property(self):
@@ -211,8 +188,6 @@ class CustomizeCollator:
         raw_features = []
         res = {}
         mode = None
-        #print(self.feature_extractor.keys())
-
         # get processed lines using tokenizer (feature_extractor)
         # features struct : {'train/eval': raw line}
         for sample in features:
@@ -220,10 +195,7 @@ class CustomizeCollator:
                 if mode == None:
                     mode = key
                 raw_features.append(self.feature_extractor[key](line))
-                #print(self.feature_extractor['train'](line))
-                #print(self.feature_extractor['eval'](line))
-                #assert 1==0
-        #print(raw_features[0])
+
         # convert batch data (run in training) with padding data 
         for fn in raw_features[0]:
             # todo
@@ -238,7 +210,6 @@ class CustomizeCollator:
                     res[fn] = pad_sequence(fv,batch_first=True,padding_value=self.feature_extractor[mode].padding_values[fn])
             else:
                 res[fn] = [f[fn] for f in raw_features]
-        #print(res)
         return res
 
 def input_builder(model, train_args, task_args=None, tokenizer=None):
@@ -265,8 +236,6 @@ class Text(Text):
                     batch = batch.strip("\n").split("\n")
                     pa_table = pa.Table.from_arrays([pa.array(batch)], schema=schema)
                     # Uncomment for debugging (will print the Arrow table size and elements)
-                    # logger.warning(f"pa_table: {pa_table} num rows: {pa_table.num_rows}")
-                    # logger.warning('\n'.join(str(pa_table.slice(i, 1).to_pydict()) for i in range(pa_table.num_rows)))
                     yield (file_idx, batch_idx), pa_table
                     batch_idx += 1
 
@@ -276,17 +245,13 @@ class IterableDatasetShard(IterableDatasetShard):
         super().__init__(*args,**kwargs)
         self.num_examples = len(self.dataset)
     def __len__(self):
-        #return len(self.dataset) #(len(self.dataset) - 1 - self.process_index) // self.num_processes + 1
+
         return (len(self.dataset) - 1 - self.process_index) // self.num_processes + 1
 
 if __name__ == "__main__":
     from config.parse_args import *
-    #parser = HfArgumentParser(getattr(arguments,"train"))
-    #args = parser.parse_args_into_dataclasses()[0]
     base_args,train_args,model_args,task_args = parse_args()
     test = InputPipe("bert-base-uncased",train_args,'eval')
     ds = test.get_dataset()
-    print(ds)
-    #for t in ds:
-    #    print(t)
+
 

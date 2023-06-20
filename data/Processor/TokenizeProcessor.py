@@ -21,8 +21,6 @@ class SELTokenize(BaseProcessor):
         self.max_length = getattr(cfg,"tok_max_length",512) if cfg else 512
         self.max_target_length = getattr(cfg,"max_length", 128) if cfg else 128
         self.sen_sep = getattr(cfg,"sen_sep", ' #Z# ') if cfg else ' #Z# '
-        #print(self.max_length, self.max_target_length)
-        #self.fn = AutoTokenizer.from_pretrained(model,cache_dir = cfg.cache_dir)
         self.out_key = ["input_ids","attention_mask","labels"]
         self.padding_values = [0,0,-100]
         if cfg.local_rank <= 0:
@@ -48,7 +46,6 @@ class CLSTokenize(BaseProcessor):
         super().__init__(cfg, model, **kwargs)
         self.idx = idx
         self.max_length = getattr(cfg,"tok_max_length",512) if cfg else 512
-        #self.fn = AutoTokenizer.from_pretrained(model,cache_dir = cfg.cache_dir)
         self.out_key = ["input_ids","token_type_ids","attention_mask"]
         self.padding_values = [0,0,0]
         self.sen_sep = getattr(cfg,"sen_sep", ' #Z# ') if cfg else ' #Z# '
@@ -79,8 +76,6 @@ class S2STokenize(BaseProcessor):
         self.idx = idx
         self.max_length = getattr(cfg,"tok_max_length",512) if cfg else 512
         self.max_target_length = getattr(cfg,"max_length", 128) if cfg else 128
-        #print(self.max_length, self.max_target_length)
-        #self.fn = AutoTokenizer.from_pretrained(model,cache_dir = cfg.cache_dir)
         if len(self.idx) == 1:
             self.out_key = ["q_input_ids","q_attention_mask"]
             self.padding_values = [0,0]
@@ -104,8 +99,6 @@ class S2STokenize(BaseProcessor):
                 res = self.fn('',return_tensors='np',max_length=self.max_length,truncation=True)
         else:
             try:
-            #if True:
-                #logger.info(columns)
                 res = self.fn(columns[self.idx[0]],return_tensors='np',max_length=self.max_length,truncation=True)
                 res = add_prefix_to_key(res, "q_")
                 d_res = self.fn(columns[self.idx[1]],return_tensors='np',max_length=self.max_target_length,truncation=True)
@@ -127,8 +120,7 @@ class S2STokenize(BaseProcessor):
         self.idx = idx
         self.max_length = getattr(cfg,"tok_max_length",512) if cfg else 512
         self.max_target_length = getattr(cfg,"max_length", 128) if cfg else 128
-        #print(self.max_length, self.max_target_length)
-        #self.fn = AutoTokenizer.from_pretrained(model,cache_dir = cfg.cache_dir)
+
         if len(self.idx) == 1:
             self.out_key = ["input_ids","attention_mask"]
             self.padding_values = [0,0]
@@ -147,7 +139,7 @@ class S2STokenize(BaseProcessor):
         else:
             try:
             #if True:
-                #logger.info(columns)
+
                 res = self.fn(columns[self.idx[0]],return_tensors='np',max_length=self.max_length,truncation=True)
                 with self.fn.as_target_tokenizer():
                     labels = self.fn(columns[self.idx[1]],return_tensors='np',max_length=self.max_target_length,truncation=True)
@@ -169,7 +161,7 @@ class MTO_S2STokenize(BaseProcessor):
         self.idx = idx
         self.max_length = getattr(cfg,"tok_max_length",512) if cfg else 512
         self.max_target_length = getattr(cfg,"max_length", 128) if cfg else 128
-        #self.fn = AutoTokenizer.from_pretrained(model,cache_dir = cfg.cache_dir)
+
         if len(self.idx) == 1:
             self.out_key = ["input_ids","attention_mask"]
             self.padding_values = [0,0]
@@ -223,7 +215,7 @@ class SeqRankTokenize(BaseProcessor) :
         self.idx = idx
         self.max_length = getattr(cfg,"tok_max_length",512) if cfg else 512
         self.max_target_length = getattr(cfg,"max_length", 128) if cfg else 128
-        #self.fn = AutoTokenizer.from_pretrained(model,cache_dir = cfg.cache_dir)
+
         self.task_cfg = task_cfg
         self.rank_num = self.task_cfg.rank_num
         self.boost_theta = self.task_cfg.boost_theta
@@ -340,7 +332,6 @@ class S2SDenosing(BaseProcessor):
         self.max_length = getattr(cfg,"tok_max_length",512) if cfg else 512
         self.max_target_length = getattr(cfg,"max_length", 128) if cfg else 128
         self.noise_density = getattr(cfg,"noise_density", 0.15) if cfg else 0.15
-        #self.fn = AutoTokenizer.from_pretrained(model,cache_dir = cfg.cache_dir)
         if len(self.idx) == 1:
             self.out_key = ["input_ids","attention_mask","labels"]
             self.padding_valuds = [0,0,-100]
@@ -374,12 +365,10 @@ class S2SDenosing(BaseProcessor):
         src = " ".join(src_words)
         tgt = " ".join(tgt_words)
 
-
         try:
             res = self.fn.prepare_seq2seq_batch(src, tgt_texts=tgt, return_tensors='np',
                                                 max_length=self.max_length, max_target_length = self.max_target_length)
         except:
             print("Data Error")
             return None
-        #print(dict([(k,numpy.squeeze(v)) for k,v in res.items()]))
         return dict([(k,numpy.squeeze(v,0)) for k,v in res.items()])

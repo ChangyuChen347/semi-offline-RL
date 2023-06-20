@@ -9,9 +9,6 @@ class BaseProcessor:
         self.fn = tokenizer if tokenizer else AutoTokenizer.from_pretrained(model, cache_dir=cfg.cache_dir)
     def property(self):
         return {
-                #"dtype":dict([(key,self.out_type) for key in self.out_key]),
-                #"padding":dict([(key,self.out_padding) for key in self.out_key]),
-                #"shapes":dict([(key,self.out_shape) for key in self.out_key]),
                 "values":dict([key,value] for key,value in zip(self.out_key,self.padding_values)) if self.padding_values else {}
                 }
 @register_processor("basic")
@@ -21,11 +18,9 @@ class SelectColumn(BaseProcessor):
         self.out_key = [out_name]
         self.out_name = out_name
         self.padding_values = None
-        #print("????",self.idx)
+
     def process(self,columns):
-        # print("!!!!!",self.idx)
-        # print(len(columns))
-        # print(self.out_name)
+
         return {self.out_name:columns[self.idx]}
 
 @register_processor("convert2int")
