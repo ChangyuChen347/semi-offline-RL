@@ -15,59 +15,9 @@ from transformers.modeling_outputs import (
     Seq2SeqLMOutput,
     Seq2SeqModelOutput,
 )
-from models.rl_utils import RL_utils
-
+from models.mask_policy_utils import MaskPolicy
 
 class RLSeq2SeqLMOutput(ModelOutput):
-    """
-    Base class for sequence-to-sequence language models outputs.
-
-    Args:
-        loss (`torch.FloatTensor` of shape `(1,)`, *optional*, returned when `labels` is provided):
-            Language modeling loss.
-        logits (`torch.FloatTensor` of shape `(batch_size, sequence_length, config.vocab_size)`):
-            Prediction scores of the language modeling head (scores for each vocabulary token before SoftMax).
-        past_key_values (`tuple(tuple(torch.FloatTensor))`, *optional*, returned when `use_cache=True` is passed or when `config.use_cache=True`):
-            Tuple of `tuple(torch.FloatTensor)` of length `config.n_layers`, with each tuple having 2 tensors of shape
-            `(batch_size, num_heads, sequence_length, embed_size_per_head)`) and 2 additional tensors of shape
-            `(batch_size, num_heads, encoder_sequence_length, embed_size_per_head)`.
-
-            Contains pre-computed hidden-states (key and values in the self-attention blocks and in the cross-attention
-            blocks) that can be used (see `past_key_values` input) to speed up sequential decoding.
-        decoder_hidden_states (`tuple(torch.FloatTensor)`, *optional*, returned when `output_hidden_states=True` is passed or when `config.output_hidden_states=True`):
-            Tuple of `torch.FloatTensor` (one for the output of the embeddings, if the model has an embedding layer, +
-            one for the output of each layer) of shape `(batch_size, sequence_length, hidden_size)`.
-
-            Hidden-states of the decoder at the output of each layer plus the initial embedding outputs.
-        decoder_attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` is passed or when `config.output_attentions=True`):
-            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
-            sequence_length)`.
-
-            Attentions weights of the decoder, after the attention softmax, used to compute the weighted average in the
-            self-attention heads.
-        cross_attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` is passed or when `config.output_attentions=True`):
-            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
-            sequence_length)`.
-
-            Attentions weights of the decoder's cross-attention layer, after the attention softmax, used to compute the
-            weighted average in the cross-attention heads.
-        encoder_last_hidden_state (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`, *optional*):
-            Sequence of hidden-states at the output of the last layer of the encoder of the model.
-        encoder_hidden_states (`tuple(torch.FloatTensor)`, *optional*, returned when `output_hidden_states=True` is passed or when `config.output_hidden_states=True`):
-            Tuple of `torch.FloatTensor` (one for the output of the embeddings, if the model has an embedding layer, +
-            one for the output of each layer) of shape `(batch_size, sequence_length, hidden_size)`.
-
-            Hidden-states of the encoder at the output of each layer plus the initial embedding outputs.
-        encoder_attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` is passed or when `config.output_attentions=True`):
-            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
-            sequence_length)`.
-
-            Attentions weights of the encoder, after the attention softmax, used to compute the weighted average in the
-            self-attention heads.
-    """
-
-    loss: Optional[torch.FloatTensor] = None
-    logits: torch.FloatTensor = None
     past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
     decoder_hidden_states: Optional[Tuple[torch.FloatTensor]] = None
     decoder_attentions: Optional[Tuple[torch.FloatTensor]] = None
@@ -75,20 +25,6 @@ class RLSeq2SeqLMOutput(ModelOutput):
     encoder_last_hidden_state: Optional[torch.FloatTensor] = None
     encoder_hidden_states: Optional[Tuple[torch.FloatTensor]] = None
     encoder_attentions: Optional[Tuple[torch.FloatTensor]] = None
-    y_b: Optional[torch.LongTensor] = None
-    y_s: Optional[torch.LongTensor] = None
-    max_ids: Optional[torch.LongTensor] = None
-    masked_ids: Optional[torch.LongTensor] = None
-    input_ids: Optional[torch.LongTensor] = None
-    labels: Optional[torch.LongTensor] = None
-    non_zero_sum_tensor: Optional[torch.LongTensor] = None
-    log_probs: Optional[torch.FloatTensor] = None
-    y_zero_b: Optional[torch.LongTensor] = None
-    y_zero_s: Optional[torch.LongTensor] = None
-    y_zero_labels: Optional[torch.LongTensor] = None
-    truth_log_probs: Optional[torch.FloatTensor] = None
-    log_probs_all: Optional[torch.FloatTensor] = None
-    lm_logits: Optional[torch.FloatTensor] = None
 
 try:
     from torch.nn import Identity
@@ -113,14 +49,10 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
 
         self.mask_input = config.mask_input
         self.mask_rate = config.mask_rate
-        self.out_mask_rate = config.out_mask_rate
-        self.io_not_same_mask = config.io_not_same_mask
-        self.tokenizer_name = config.tokenizer_name
         self.device_map = None
-        self.truth_log_probs = config.truth_log_probs
         self.is_sharing_encoder = False
         self.mask_id = 32099
-        self.rl_utils = RL_utils(mask_id=self.mask_id, config=config, bpe_prefix='▁')
+        self.mask_policy = MaskPolicy(mask_id=self.mask_id, config=config, bpe_prefix='▁')
 
     def sharing_encoder(self, flag):
         self.is_sharing_encoder = flag
@@ -357,7 +289,7 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
         bs = None
         if labels is not None and decoder_input_ids is None and decoder_inputs_embeds is None:
             bs = labels.shape[0]
-            mask_labels, masked_pos_shift, masked_pos_non_shift = self.rl_utils.get_masked_input(labels,
+            mask_labels, masked_pos_shift, masked_pos_non_shift = self.mask_policy.get_masked_input(labels,
                                                                                                  input_ids.shape[0],
                                                                                                  tokenizer=self.tokenizer)
             decoder_input_ids = self._shift_right(labels)
@@ -409,6 +341,16 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
 
         sequence_output = decoder_outputs[0]
 
+        outputs = Seq2SeqLMOutput(
+            past_key_values=past_key_values,
+            decoder_hidden_states=decoder_outputs.hidden_states,
+            decoder_attentions=decoder_outputs.attentions,
+            cross_attentions=decoder_outputs.cross_attentions,
+            encoder_last_hidden_state=encoder_outputs.last_hidden_state,
+            encoder_hidden_states=encoder_outputs.hidden_states,
+            encoder_attentions=encoder_outputs.attentions,
+        )
+
         # Set device for model parallelism
         if self.model_parallel:
             torch.cuda.set_device(self.encoder.first_device)
@@ -422,7 +364,7 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
 
         lm_logits = self.lm_head(sequence_output)  # bs, seq_len, dim -> bs, seq_len, vocab
 
-        res = self.rl_utils.split_return(lm_logits, input_ids, labels,masked_pos_shift, masked_pos_non_shift, bs, return_dict, outputs, mask_labels, decoder_input_ids)
+        res = self.mask_policy.split_return(lm_logits, input_ids, labels,masked_pos_shift, masked_pos_non_shift, bs, return_dict, outputs, mask_labels, decoder_input_ids, self.tokenizer)
 
         return res
 
@@ -442,9 +384,11 @@ class T5ForConditionalGeneration(T5ForConditionalGeneration):
             return {"loss":pad.new_full([1],0.0,dtype=torch.float32),"ids":res}
         else:
             if 'doc' in kwargs:
-                kwargs.pop('doc') #todo
+                kwargs.pop('doc')
             if 'query' in kwargs:
-                kwargs.pop('query') #todo
+                kwargs.pop('query')
+            if 'data_kd' in kwargs:
+                kwargs.pop('data_kd')
             if 'not_seq_decode' in kwargs:
                 kwargs.pop('not_seq_decode')
             return_dict = self.rl_forward(**kwargs)

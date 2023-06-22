@@ -31,7 +31,6 @@ def parse_args():
     #02. Data & Train Configs
 
     parser = HfArgumentParser(ArgumentClass.train)
-    #print(allargs["base_args"].scene)
 
     allargs["train_args"],remain_train = parser.parse_args_into_dataclasses(remain,args_filename= folder + "/SceneConfigs/"+allargs["base_args"].scene,return_remaining_strings=True)
     #03. Model Configs

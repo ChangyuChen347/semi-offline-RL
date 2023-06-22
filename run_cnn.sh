@@ -1,38 +1,35 @@
-CUDA_VISIBLE_DEVICES=2 python main.py \
+#!/bin/bash
+CUDA_VISIBLE_DEVICES=0 python main.py \
     --do_train \
     --scene bart_cnn_generation \
     --use_logit True \
-    --new_cand_mask True \
     --report_to tensorboard \
     --seed 2022 \
-    --kd_inputs True \
     --smooth 0.1 \
     --trainer rl \
     --save_steps 10000000 \
-    --rewards 'rouge' \
-    --batch_mean False \
-    --learning_rate 0.000003 \
+    --learning_rate 0.000001 \
     --num_train_epochs 60 \
     --max_grad_norm 1 \
     --print_every 1000 \
-    --eval_metrics rouges,rouge \
-    --length_normalize_4_rl \
-    --training_length_penalty 1 \
-    --learning_rate 0.000001 \
-    --eval_dir sample/cnn_test_no_pre_brio_untok_cased_origin_order \
-    --train_dir sample/cnn_train_no_pre_brio_untok_cased \
-    --rouge_type 12l \
-    --reward_type rouges \
-    --cand_pos_remove_sp_tk True \
     --save_every 4000 \
     --eval_steps 2000 \
-    --recover cnn_ft0_model \
-    --per_device_eval_batch_size 16 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 8 \
-    --exp_name demo \
-    --eval_steps 1 \
-    --rl_weight 40 \
-    --sample_num 31 \
-    --mask_rate 0.7 \
+    --per_device_eval_batch_size 16 \
+    --length_normalize_4_rl True \
+    --training_length_penalty 1 \
+    --train_dir static_data/cnndm/cnndm_train.tsv \
+    --eval_dir static_data/cnndm/cnndm_test.tsv \
+    --cand_pos_remove_sp_tk True \
+    --recover cnndm_base_model \
+    --exp_name demo_cnndm \
+    --rewards 'rouge' \
+    --rouge_type 12l \
+    --reward_type rouges \
+    --rl_weight 20 \
+    --sample_num 63 \
+    --mask_rate 0.4 \
     --kd_inputs_worst True \
+    --eval_metrics rouges,rouge \
+    --seq_decode_model bart \

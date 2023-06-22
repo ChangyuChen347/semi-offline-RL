@@ -9,7 +9,7 @@ from transformers.modeling_outputs import (
 
 )
 
-class RL_utils():
+class MaskPolicy():
 
     def __init__(self, mask_id, config, bpe_prefix):
         self.mask_id = mask_id
@@ -138,10 +138,11 @@ class RL_utils():
             mp_long = mp.long()
             ori_mp = mp.clone()
 
-            other_2_zero_labels = labels * ~(labels.data.eq(-100) | labels.data.eq(tokenizer.eos_token_id)) + ones * (
+            pads = torch.ones_like(labels, dtype=torch.long).cuda() * tokenizer.pad_token_id
+            other_2_pads_labels = labels * ~(labels.data.eq(-100) | labels.data.eq(tokenizer.eos_token_id)) + pads * (
                         labels.data.eq(-100) | labels.data.eq(tokenizer.eos_token_id))  # -100 -> 0#
             _, max_ids = torch.max(log_probs, dim=-1)
-            y_b = other_2_zero_labels * (1 - mp_long) + max_ids * mp_long
+            y_b = other_2_pads_labels * (1 - mp_long) + max_ids * mp_long
 
             sample_num = 0
             if not ce:
@@ -163,8 +164,8 @@ class RL_utils():
                 masked_ids = masked_ids.reshape(bs * (sample_num + 1), s2)
                 log_probs = log_probs.reshape(bs * (sample_num + 1), s2)
 
-                other_2_zero_labels = other_2_zero_labels.unsqueeze(1).expand(-1, sample_num + 1, -1)
-                other_2_zero_labels = other_2_zero_labels.reshape(bs * (sample_num + 1), -1)
+                other_2_pads_labels = other_2_pads_labels.unsqueeze(1).expand(-1, sample_num + 1, -1)
+                other_2_pads_labels = other_2_pads_labels.reshape(bs * (sample_num + 1), -1)
                 mp_long = mp_long.unsqueeze(1).expand(-1, sample_num + 1, -1)
                 mp_long = mp_long.reshape(bs * (sample_num + 1), -1)
                 mp = mp.unsqueeze(1).expand(-1, sample_num + 1, -1)
@@ -184,14 +185,14 @@ class RL_utils():
                 log_probs = torch.log(prob)
                 masked_ids = masked_ids.reshape(bs * (sample_num + 1), s2)
                 log_probs = log_probs.reshape(bs * (sample_num + 1), s2)
-                other_2_zero_labels = other_2_zero_labels.unsqueeze(1).expand(-1, sample_num + 1, -1)
-                other_2_zero_labels = other_2_zero_labels.reshape(bs * (sample_num + 1), -1)
+                other_2_pads_labels = other_2_pads_labels.unsqueeze(1).expand(-1, sample_num + 1, -1)
+                other_2_pads_labels = other_2_pads_labels.reshape(bs * (sample_num + 1), -1)
                 mp_long = mp_long.unsqueeze(1).expand(-1, sample_num + 1, -1)
                 mp_long = mp_long.reshape(bs * (sample_num + 1), -1)
                 mp = mp.unsqueeze(1).expand(-1, sample_num + 1, -1)
                 mp = mp.reshape(bs * (sample_num + 1), -1)
 
-            y_s = other_2_zero_labels * (1 - mp_long) + masked_ids * mp_long
+            y_s = other_2_pads_labels * (1 - mp_long) + masked_ids * mp_long
             if sample_num != 0:
                 log_probs = log_probs * mp.float()
 
@@ -201,8 +202,9 @@ class RL_utils():
             masked_lm_loss = loss_fct(lm_logits.reshape(-1, self.config.vocab_size), labels.reshape(-1))
 
         if not return_dict:
-            output = (lm_logits,) + outputs[1:]
-            return ((masked_lm_loss,) + output) if masked_lm_loss is not None else output
+            raise NotImplementedError("not return_dict not implemented yet.")
+            # output = (lm_logits,) + outputs[1:]
+            # return ((masked_lm_loss,) + output) if masked_lm_loss is not None else output
 
         output = Seq2SeqLMOutput(
                 loss=masked_lm_loss,
@@ -223,7 +225,8 @@ class RL_utils():
                 mask_labels, masked_pos_shift, \
                 masked_pos_non_shift, decoder_input_ids
 
-    def split_return(self, lm_logits, input_ids, labels,masked_pos_shift, masked_pos_non_shift, bs, return_dict, outputs, mask_labels, decoder_input_ids):
+    def split_return(self, lm_logits, input_ids, labels,masked_pos_shift,
+                     masked_pos_non_shift, bs, return_dict, outputs, mask_labels, decoder_input_ids, tokenizer):
         '''
         split the output for mle and rl
         '''
@@ -244,20 +247,23 @@ class RL_utils():
             ce_masked_pos_non_shift = masked_pos_non_shift[:, 0, :]
             masked_pos_non_shift = masked_pos_non_shift[:, 1, :]
 
-            res= [self.rl_utils.construct_return(lm_logits=ce_lm_logits, labels=ce_labels, bs=bs//2,
+            'not split "outputs" yet.'
+            res= [self.construct_return(lm_logits=ce_lm_logits, labels=ce_labels, bs=bs//2,
                                      masked_pos_shift=ce_masked_pos_shift,
                                    masked_pos_non_shift=ce_masked_pos_non_shift,
                                    ce=True, return_dict=return_dict, outputs=outputs, input_ids=input_ids,
-                                                 mask_labels=mask_labels, decoder_input_ids=decoder_input_ids
+                                                 mask_labels=mask_labels, decoder_input_ids=decoder_input_ids, tokenizer=tokenizer
                                                  ),
-                    self.rl_utils.construct_return(lm_logits=lm_logits, labels=labels, bs=bs // 2,
+                    self.construct_return(lm_logits=lm_logits, labels=labels, bs=bs // 2,
                                       masked_pos_shift=masked_pos_shift,
                                      masked_pos_non_shift=masked_pos_non_shift, return_dict=return_dict, outputs=outputs, input_ids=input_ids,
-                                                 mask_labels=mask_labels, decoder_input_ids=decoder_input_ids),
+                                                 mask_labels=mask_labels, decoder_input_ids=decoder_input_ids, tokenizer=tokenizer),
 
                     ]
         else:
-            res= self.rl_utils.construct_return(lm_logits=lm_logits, labels=labels, bs=bs,
+            res= self.construct_return(lm_logits=lm_logits, labels=labels, bs=bs,
                                     masked_pos_shift=masked_pos_shift, masked_pos_non_shift=masked_pos_non_shift, return_dict=return_dict,
                                                 outputs=outputs, input_ids=input_ids,
-                                                 mask_labels=mask_labels, decoder_input_ids=decoder_input_ids)
+                                                 mask_labels=mask_labels, decoder_input_ids=decoder_input_ids, tokenizer=tokenizer)
+
+        return res

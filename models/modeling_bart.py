@@ -14,7 +14,7 @@ from transformers.modeling_outputs import (
     Seq2SeqLMOutput,
     Seq2SeqModelOutput,
 )
-from models.rl_utils import RL_utils
+from models.mask_policy_utils import MaskPolicy
 
 
 
@@ -140,7 +140,6 @@ class BartForConditionalGeneration(BartForConditionalGeneration):
         try:
             self.mask_input = config.mask_input
             self.mask_rate = config.mask_rate
-            self.tokenizer_name = config.tokenizer_name
             self.model_parallel = False
             self.device_map = None
             self.vocab_size = config.vocab_size
@@ -149,7 +148,7 @@ class BartForConditionalGeneration(BartForConditionalGeneration):
         except AttributeError as e:
             print(e)
             pass
-        self.rl_utils = RL_utils(mask_id=self.mask_id, config=config, bpe_prefix='Ġ')
+        self.mask_policy = MaskPolicy(mask_id=self.mask_id, config=config, bpe_prefix='Ġ')
 
     def forward (self,**kwargs):
         if "input_ids" in kwargs and kwargs["input_ids"] is not None:
@@ -171,8 +170,8 @@ class BartForConditionalGeneration(BartForConditionalGeneration):
                 kwargs.pop('doc') #todo
             if 'query' in kwargs:
                 kwargs.pop('query') #todo
-            if 'q2' in kwargs:
-                kwargs.pop('q2')
+            if 'data_kd' in kwargs:
+                kwargs.pop('data_kd')
             if 'not_seq_decode' in kwargs:
                 kwargs.pop('not_seq_decode')
 
@@ -246,7 +245,7 @@ class BartForConditionalGeneration(BartForConditionalGeneration):
         bs = None
         if labels is not None and decoder_input_ids is None and decoder_inputs_embeds is None:
             bs = labels.shape[0]
-            mask_labels, masked_pos_shift, masked_pos_non_shift = self.rl_utils.get_masked_input(labels, input_ids.shape[0], tokenizer=self.tokenizer)
+            mask_labels, masked_pos_shift, masked_pos_non_shift = self.mask_policy.get_masked_input(labels, input_ids.shape[0], tokenizer=self.tokenizer)
             decoder_input_ids = shift_tokens_right(
                 mask_labels, self.config.pad_token_id, 0
             )
@@ -270,7 +269,8 @@ class BartForConditionalGeneration(BartForConditionalGeneration):
             return_dict=return_dict,
         )
         lm_logits = self.lm_head(outputs[0]) + self.final_logits_bias
-        res = self.rl_utils.split_return(lm_logits, input_ids, labels,masked_pos_shift, masked_pos_non_shift, bs, return_dict, outputs, mask_labels, decoder_input_ids)
+        res = self.mask_policy.split_return(lm_logits, input_ids, labels,masked_pos_shift, masked_pos_non_shift, bs,
+                                         return_dict, outputs, mask_labels, decoder_input_ids, self.tokenizer)
         return res
 
     def sharing_encoder(self, flag):

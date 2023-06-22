@@ -5,8 +5,7 @@ from scipy.special import softmax
 
 from . import register_outputter
 from transformers import AutoTokenizer
-from data.helper.formatter import Formatter
-#from multiprocessing import Process,Queue
+
 from pathos.helpers import mp
 from typing import List, Union, Tuple 
 

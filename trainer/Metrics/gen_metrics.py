@@ -112,6 +112,14 @@ class SQUAD_BLEU():
         tokenizer = kwargs.pop("tokenizer", None)
         self.tokenizer = tokenizer if tokenizer is not None else AutoTokenizer.from_pretrained(model_name)
         self.cfg = cfg
+
+        if self.cfg.eval_dir == 'squad_validation.tsv':
+            self.src = open('sentence-valid.txt').readlines()
+            self.tgt = open('question-valid.txt').readlines()
+        elif self.cfg.eval_dir == 'squad_test.tsv':
+            self.src = open('sentence-test.txt').readlines()
+            self.tgt = open('question-test.txt').readlines()
+
         self.print_instance = 10
         try:
             nltk.data.find('tokenizers/punkt')
@@ -129,8 +137,7 @@ class SQUAD_BLEU():
         bleu4 = []
         length = []
         all_pred = []
-        src = open('sentence-test.txt').readlines()
-        tgt = open('question-test.txt').readlines()
+
         to_eval_hyp_dict = {}
         to_eval_ref_dict = {}
         for i, label in enumerate(EvalPredict.label_ids):
@@ -148,11 +155,11 @@ class SQUAD_BLEU():
                 # curr_pred = ' '.join(nltk.word_tokenize(curr_pred))
                 pred.append(curr_pred)
                 all_pred.append(curr_pred)
-            if src[i] in to_eval_hyp_dict:
-                to_eval_ref_dict[src[i]].append(tgt[i].strip().lower().encode('utf-8'))
+            if self.src[i] in to_eval_hyp_dict:
+                to_eval_ref_dict[self.src[i]].append(self.tgt[i].strip().lower().encode('utf-8'))
             else:
-                to_eval_ref_dict[src[i]] = [tgt[i].strip().lower().encode('utf-8')]
-                to_eval_hyp_dict[src[i]] = [curr_pred.strip().lower().encode('utf-8')]
+                to_eval_ref_dict[self.src[i]] = [self.tgt[i].strip().lower().encode('utf-8')]
+                to_eval_hyp_dict[self.src[i]] = [curr_pred.strip().lower().encode('utf-8')]
             for t in pred:
                 length.append(len(t.split()))
 
@@ -166,12 +173,21 @@ class SQUAD_ROUGE():
         tokenizer = kwargs.pop("tokenizer", None)
         self.tokenizer = tokenizer if tokenizer is not None else AutoTokenizer.from_pretrained(model_name)
         self.cfg = cfg
+
+        if self.cfg.eval_dir == 'squad_validation.tsv':
+            self.src = open('sentence-valid.txt').readlines()
+            self.tgt = open('question-valid.txt').readlines()
+        elif self.cfg.eval_dir == 'squad_test.tsv':
+            self.src = open('sentence-test.txt').readlines()
+            self.tgt = open('question-test.txt').readlines()
+
         self.print_instance = 10
 
         try:
             nltk.data.find('tokenizers/punkt')
         except LookupError:
             nltk.download('punkt')
+
 
     def __call__(self, EvalPredict):
         if EvalPredict.predictions.ndim == 3:
@@ -198,12 +214,11 @@ class SQUAD_ROUGE():
                 # curr_pred = ' '.join(nltk.word_tokenize(curr_pred))
                 pred.append(curr_pred)
                 all_pred.append(curr_pred)
-            if src[i] in to_eval_hyp_dict:
-                to_eval_ref_dict[src[i]].append(tgt[i].strip().lower().encode('utf-8'))
+            if self.src[i] in to_eval_hyp_dict:
+                to_eval_ref_dict[self.src[i]].append(self.tgt[i].strip().lower().encode('utf-8'))
             else:
-                to_eval_ref_dict[src[i]] = [tgt[i].strip().lower().encode('utf-8')]
-                to_eval_hyp_dict[src[i]] = [curr_pred.strip().lower().encode('utf-8')]
-            # _, rouge_scores = rouge_squad.compute_score(to_eval_ref_dict, to_eval_hyp_dict)
+                to_eval_ref_dict[self.src[i]] = [self.tgt[i].strip().lower().encode('utf-8')]
+                to_eval_hyp_dict[self.src[i]] = [curr_pred.strip().lower().encode('utf-8')]
             for t in pred:
                 length.append(len(t.split()))
         import pickle as pkl

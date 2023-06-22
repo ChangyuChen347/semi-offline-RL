@@ -114,9 +114,6 @@ class FeatureExtractor():
         self.tokenizer = auto_tokenizer
         self.init_proc()
         self.set_property()
-
-        print("\033[0;37;41m\t{}\033[0m".format(self.input_header))
-        print("\033[0;37;41m\t{}\033[0m".format(self.model_header))
     def __call__(self,x):
         return self.preprocess(x)
     
@@ -124,9 +121,6 @@ class FeatureExtractor():
         """ initialize line processor, e.g, tokenizer processor """
         for mh in self.model_header:
             cols = mh.split(":")
-            print("\033[0;37;41m\t{}{}\033[0m".format('model_header', self.model_header))
-            print("\033[0;37;41m\t{}{}\033[0m".format('mh', mh))
-            print("\033[0;37;41m\t{}{}\033[0m".format('cols', cols))
             out_name = cols[-1]
             if out_name in self.processors:
                 raise ValueError(f"processor for out_name={out_name} is already registered with Processor {self.processors[out_name]}")

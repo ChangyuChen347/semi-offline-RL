@@ -9,7 +9,7 @@ from torch.distributions import Categorical
 import torch.nn.functional as F
 from transformers.file_utils import ModelOutput
 import random
-from models.rl_utils import RL_utils
+from models.mask_policy_utils import MaskPolicy
 
 from transformers.models.pegasus.configuration_pegasus import PegasusConfig
 try:
@@ -38,15 +38,15 @@ class PegasusForConditionalGeneration(PegasusForConditionalGeneration):
         self.mask_input = config.mask_input
         self.mask_rate = config.mask_rate
 
-        self.tokenizer_name = config.tokenizer_name
+
         self.device_map = None
-        self.truth_log_probs = config.truth_log_probs
+
         self.vocab_size = config.vocab_size
         self.mask_id = 3
         self.span_mask = config.span_mask
-        self.not_mask_stop = config.not_mask_stop
+
         self.sample_topk = config.sample_topk
-        self.rl_utils = RL_utils(mask_id=self.mask_id, config=config, bpe_prefix='▁')
+        self.mask_policy = MaskPolicy(mask_id=self.mask_id, config=config, bpe_prefix='Ġ')
 
 
     def forward (self,**kwargs):
@@ -65,8 +65,8 @@ class PegasusForConditionalGeneration(PegasusForConditionalGeneration):
                 kwargs.pop('doc') #todo
             if 'query' in kwargs:
                 kwargs.pop('query') #todo
-            if 'q2' in kwargs:
-                kwargs.pop('q2')
+            if 'data_kd' in kwargs:
+                kwargs.pop('data_kd')
             if 'not_seq_decode' in kwargs:
                 kwargs.pop('not_seq_decode')
             return self.rl_forward(**kwargs)
@@ -111,7 +111,7 @@ class PegasusForConditionalGeneration(PegasusForConditionalGeneration):
         bs = None
         if labels is not None and decoder_input_ids is None and decoder_inputs_embeds is None:
             bs = labels.shape[0]
-            mask_labels, masked_pos_shift, masked_pos_non_shift = self.rl_utils.get_masked_input(labels,
+            mask_labels, masked_pos_shift, masked_pos_non_shift = self.mask_policy.get_masked_input(labels,
                                                                                                  input_ids.shape[0],
                                                                                                  tokenizer=self.tokenizer)
             decoder_input_ids = shift_tokens_right(
@@ -138,12 +138,22 @@ class PegasusForConditionalGeneration(PegasusForConditionalGeneration):
             return_dict=return_dict,
         )
 
+        outputs = Seq2SeqLMOutput(
+            past_key_values=decoder_outputs.past_key_values,
+            decoder_hidden_states=decoder_outputs.decoder_hidden_states,
+            decoder_attentions=decoder_outputs.decoder_attentions,
+            cross_attentions=decoder_outputs.cross_attentions,
+            encoder_last_hidden_state=decoder_outputs.encoder_last_hidden_state,
+            encoder_hidden_states=decoder_outputs.encoder_hidden_states,
+            encoder_attentions=decoder_outputs.encoder_attentions,
+        )
 
         sequence_output = decoder_outputs[0]
 
         lm_logits = self.lm_head(sequence_output) + self.final_logits_bias  # bs, seq_len,
 
-        res = self.rl_utils.split_return(lm_logits, input_ids, labels,masked_pos_shift, masked_pos_non_shift, bs, return_dict, outputs, mask_labels, decoder_input_ids)
+        res = self.mask_policy.split_return(lm_logits, input_ids, labels,masked_pos_shift,
+                                            masked_pos_non_shift, bs, return_dict, outputs, mask_labels, decoder_input_ids, tokenizer=self.tokenizer)
 
         return res
 

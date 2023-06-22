@@ -1,7 +1,7 @@
---train_header query,doc,q2
---train_model_header s2s_tokenize:query:doc:input,query,doc,q2
---eval_header query,doc,q2
---eval_model_header s2s_tokenize:query:doc:input,query,doc,q2
+--train_header query,doc,data_kd
+--train_model_header s2s_tokenize:query:doc:input,query,doc,data_kd
+--eval_header query,doc,data_kd
+--eval_model_header s2s_tokenize:query:doc:input,query,doc,data_kd
 --train_dir ./samsum_train
 --eval_dir ./samsum_eval
 --eval_metrics bleu

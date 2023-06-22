@@ -70,7 +70,7 @@ from torch import nn
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 import math 
 import torch.distributed as dist
-from unirl import RL_env
+from rl_env import RL_env
 
 from transformers import AdamW, get_linear_schedule_with_warmup
 
@@ -88,23 +88,6 @@ logger = logging.get_logger(__name__)
 logger.setLevel('INFO')
 
 from transformers.integrations import AzureMLCallback
-
-from typing import NamedTuple
-class EvalPrediction(NamedTuple):
-    """
-    Evaluation output (always contains labels), to be used to compute metrics.
-
-    Parameters:
-        predictions (:obj:`np.ndarray`): Predictions of the model.
-        label_ids (:obj:`np.ndarray`): Targets to be matched.
-    """
-
-    predictions: Union[np.ndarray, Tuple[np.ndarray]]
-    label_ids: np.ndarray
-    q2_ids: Optional[List[str]]
-    raw_src: Optional[List[str]]
-    raw_src_origin: Optional[List[str]]
-
 
 
 class HisStatisticInfo:
@@ -128,19 +111,19 @@ class HisStatisticInfo:
         self.print_every = args.print_every
     def update(self):
         for name in self.his_greedy_rewards.keys():
-            self.his_greedy_rewards[name] = self.his_greedy_rewards[name][-print_every:]
-        self.his_ce_loss = self.his_ce_loss[-print_every:]
-        self.his_rl_loss = self.his_rl_loss[-print_every:]
-        self.his_loss = self.his_loss[-print_every:]
-        self.his_2_gram_acc = self.his_2_gram_acc[-print_every:]
-        self.his_3_gram_acc = self.his_3_gram_acc[-print_every:]
-        self.his_4_gram_acc = self.his_4_gram_acc[-print_every:]
-        self.his_2_gram_loss = self.his_2_gram_loss[-print_every:]
-        self.his_3_gram_loss = self.his_3_gram_loss[-print_every:]
-        self.his_4_gram_loss = self.his_4_gram_loss[-print_every:]
-        self.his_dif_cont_rate = self.his_dif_cont_rate[-print_every:]
+            self.his_greedy_rewards[name] = self.his_greedy_rewards[name][-self.print_every:]
+        self.his_ce_loss = self.his_ce_loss[-self.print_every:]
+        self.his_rl_loss = self.his_rl_loss[-self.print_every:]
+        self.his_loss = self.his_loss[-self.print_every:]
+        self.his_2_gram_acc = self.his_2_gram_acc[-self.print_every:]
+        self.his_3_gram_acc = self.his_3_gram_acc[-self.print_every:]
+        self.his_4_gram_acc = self.his_4_gram_acc[-self.print_every:]
+        self.his_2_gram_loss = self.his_2_gram_loss[-self.print_every:]
+        self.his_3_gram_loss = self.his_3_gram_loss[-self.print_every:]
+        self.his_4_gram_loss = self.his_4_gram_loss[-self.print_every:]
+        self.his_dif_cont_rate = self.his_dif_cont_rate[-self.print_every:]
 
-    def print_info(self, tokenizer):
+    def print_info(self, tokenizer, step):
         for name, v in self.his_greedy_rewards.items():
             logger.info('At step {}, his_greedy_rewards {} = {}'.format(step, name, np.mean(v)))
         logger.info('At step {}, his_ce_loss {}'.format(step, np.mean(self.his_ce_loss)))
@@ -164,43 +147,43 @@ class HisStatisticInfo:
         to_print_dist = sorted(self.reward_dist_dict.items(), key=lambda item: -np.mean(item[1]))
         try:
             # Print the tokens and their mean rewards for the top 20 non-"-1" tokens from to_print_dist
-            logger.info('to_print_dist',
-                        [(tokenizer.convert_ids_to_tokens([t[0]]), np.mean(t[1])) for t in
-                         to_print_dist[:20] if t[0] != -1])
+            logger.info('to_print_dist: '+
+                        str([(tokenizer.convert_ids_to_tokens([t[0]]), np.mean(t[1])) for t in
+                         to_print_dist[:20] if t[0] != -1]))
         except (OverflowError, UnicodeEncodeError) as e:
-            logger.info('to_print_dist top 20',
-                        [t[0] for t in
-                         to_print_dist[:20]])
+            logger.info('to_print_dist top 20: '+
+                        str([t[0] for t in
+                         to_print_dist[:20]]))
             logger.info(e)
         try:
             # Print the tokens and their mean rewards for the last 20 non-"-1" tokens from to_print_dist
-            logger.info('to_print_dist',
-                        [(tokenizer.convert_ids_to_tokens([t[0]]), np.mean(t[1])) for t in
-                         to_print_dist[-20:] if t[0] != -1])
+            logger.info('to_print_dist: '+
+                        str([(tokenizer.convert_ids_to_tokens([t[0]]), np.mean(t[1])) for t in
+                         to_print_dist[-20:] if t[0] != -1]))
         except (OverflowError, UnicodeEncodeError) as e:
-            logger.info('to_print_dist last 20',
-                        [t[0] for t in
-                         to_print_dist[-20:]])
+            logger.info('to_print_dist last 20: '+
+                        str([t[0] for t in
+                         to_print_dist[-20:]]))
             logger.info(e)
         try:
             # Print the tokens and their mean rewards for the top 20 non-"-1" tokens from to_print_count
-            logger.info('to_print_count top 20',
-                        [(tokenizer.convert_ids_to_tokens([t[0]]), np.mean(t[1])) for t in
-                         to_print_count[:20] if t[0] != -1])
+            logger.info('to_print_count top 20: '+
+                        str([(tokenizer.convert_ids_to_tokens([t[0]]), np.mean(t[1])) for t in
+                         to_print_count[:20] if t[0] != -1]))
         except (OverflowError, UnicodeEncodeError) as e:
-            logger.info('to_print_count top 20',
-                        [t[0] for t in
-                         to_print_count[:20]])
+            logger.info('to_print_count top 20: '+
+                        str([t[0] for t in
+                         to_print_count[:20]]))
             logger.info(e)
         try:
             # Print the tokens and their mean rewards for the last 20 non-"-1" tokens from to_print_count
-            logger.info('to_print_count last 20',
-                        [(tokenizer.convert_ids_to_tokens([t[0]]), np.mean(t[1])) for t in
-                         to_print_count[-20:] if t[0] != -1])
+            logger.info('to_print_count last 20: '+
+                        str([(tokenizer.convert_ids_to_tokens([t[0]]), np.mean(t[1])) for t in
+                         to_print_count[-20:] if t[0] != -1]))
         except (OverflowError, UnicodeEncodeError) as e:
-            logger.info('to_print_count last 20',
-                        [t[0] for t in
-                         to_print_count[-20:]])
+            logger.info('to_print_count last 20: '+
+                        str([t[0] for t in
+                         to_print_count[-20:]]))
             logger.info(e)
 
 @register_trainer("rl")
@@ -584,7 +567,7 @@ class Trainer(BaseTrainer):
                         torch.save(model.state_dict(), save_path)
                 if (step + 1) % print_every == 0:
                     self.his_info.update()
-                    self.his_info.print_info(tokenizer=self.rl_env.tokenizer)
+                    self.his_info.print_info(tokenizer=self.rl_env.tokenizer, step=step)
 
                 if ((step + 1) % args.gradient_accumulation_steps == 0 or (
                     # last step in epoch but step is always smaller than gradient_accumulation_steps
@@ -631,7 +614,6 @@ class Trainer(BaseTrainer):
                     self.state.epoch = epoch + (step + 1) / steps_in_epoch
 
                     self.control = self.callback_handler.on_step_end(args, self.state, self.control)
-                    self.model.decoding_method = 'non_seq'
 
                     self._maybe_log_save_evaluate(tr_loss, model, trial, epoch, ignore_keys_for_eval)
 
@@ -842,31 +824,31 @@ class Trainer(BaseTrainer):
             inputs['labels'] = inputs['labels'][:, 1:]
 
         ori_inputs = copy.deepcopy(inputs)
-        q2 = inputs['q2']
+        data_kd = inputs['data_kd']
         inputs['not_seq_decode'] = True
         model.train()
 
         not_normal_log_probs = None
         # <#REFS#> is only for SQuAD
-        if '<#REFS#>' in inputs['q2'][0]:
+        if '<#REFS#>' in inputs['data_kd'][0]:
             # 'refs' may contain multi references in SQuAD
-            refs = [e.split('<#REFS#>')[1] for e in inputs['q2']]
-            inputs['q2'] = [e.split('<#REFS#>')[0] for e in inputs['q2']]
+            refs = [e.split('<#REFS#>')[1] for e in inputs['data_kd']]
+            inputs['data_kd'] = [e.split('<#REFS#>')[0] for e in inputs['data_kd']]
         else:
             refs = None
 
 
         # choose the static data: data+/data-/groundtruth
-        if '<#QUERY#>' in inputs['q2'][0]:
-            tmp_q2 = [t.split('<#QUERY#>')[1] for t in inputs['q2']]
+        if '<#QUERY#>' in inputs['data_kd'][0]:
+            tmp_data_kd = [t.split('<#QUERY#>')[1] for t in inputs['data_kd']]
         else:
-            tmp_q2 =  inputs['q2']
+            tmp_data_kd =  inputs['data_kd']
         assert self.args.cand_num == 1
-        cands = [t for e in tmp_q2 for t in random.sample(e.split('<#SEP#>')[:], self.args.cand_num)]
+        cands = [t for e in tmp_data_kd for t in random.sample(e.split('<#SEP#>')[:], self.args.cand_num)]
         if self.args.cand_num == 1 and self.args.kd_inputs_best:
-            cands = [t for e in tmp_q2 for t in random.sample(e.split('<#SEP#>')[:1], self.args.cand_num)]
+            cands = [t for e in tmp_data_kd for t in random.sample(e.split('<#SEP#>')[:1], self.args.cand_num)]
         if self.args.cand_num == 1 and self.args.kd_inputs_worst:
-            cands = [t for e in tmp_q2 for t in random.sample(e.split('<#SEP#>')[-1:], self.args.cand_num)]
+            cands = [t for e in tmp_data_kd for t in random.sample(e.split('<#SEP#>')[-1:], self.args.cand_num)]
         cands = [t.split('<#SCORE#>')[0] for t in cands]
         cands = self.rl_env.add_padding_(cands, pad_id=-100, max_len=256)
         if self.args.seq_decode_model == 'bart':
@@ -874,7 +856,7 @@ class Trainer(BaseTrainer):
         kd_seq_labels = cands
         kd_inputs = copy.deepcopy(inputs)
         assert self.args.cand_num == 1
-        if self.args.not_replace_kd: # use the original ground truth
+        if self.args.groundtruth_input: # use the original ground truth
             second_kd_inputs_labels = kd_inputs['labels']
         else:
             kd_inputs['labels'] = kd_seq_labels
@@ -952,7 +934,6 @@ class Trainer(BaseTrainer):
             y_s = y_s * ~new_cand_mask + second_kd_inputs_labels.unsqueeze(1).repeat(1, cand_num, 1).reshape(-1,
                                                                                                              cand_mask.shape[
                                                                                                                  -1]) * new_cand_mask
-            log_probs = log_probs * self.args.scale
             not_normal_log_probs = log_probs.clone()
             for_count_y_s = y_s * cand_mask + torch.ones_like(y_s).long().cuda() * -1 * ~cand_mask
             for_count_y_s = for_count_y_s.cpu().numpy()
@@ -967,7 +948,7 @@ class Trainer(BaseTrainer):
         rl_loss = 0
         greedy_reward_dict = {}
         # compute the rl loss and record the token-wise reward
-        if self.model.config.do_rl:
+        if self.args.do_rl:
             np.random.seed(self.state.global_step)
             rl_loss, \
                 greedy_reward_tensor, \
@@ -981,7 +962,7 @@ class Trainer(BaseTrainer):
                                     input_ids,
                                     labels_,
                                     log_probs,
-                                    q2,
+                                    data_kd,
                                     non_zero_sum_tensor=None,
                                     not_normal_log_probs=not_normal_log_probs,
                                     raw_src=inputs['query'],

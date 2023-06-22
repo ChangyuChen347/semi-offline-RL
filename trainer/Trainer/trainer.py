@@ -50,8 +50,23 @@ import collections
 if is_datasets_available():
     import datasets
 logger = logging.get_logger(__name__)
-
+logger.setLevel('INFO')
 from transformers.integrations import AzureMLCallback
+from typing import NamedTuple
+class EvalPrediction(NamedTuple):
+    """
+    Evaluation output (always contains labels), to be used to compute metrics.
+
+    Parameters:
+        predictions (:obj:`np.ndarray`): Predictions of the model.
+        label_ids (:obj:`np.ndarray`): Targets to be matched.
+    """
+
+    predictions: Union[np.ndarray, Tuple[np.ndarray]]
+    label_ids: np.ndarray
+    data_kd_ids: Optional[List[str]]
+    raw_src: Optional[List[str]]
+    raw_src_origin: Optional[List[str]]
 
 @register_trainer("common")
 class Trainer(Trainer):
@@ -80,10 +95,7 @@ class Trainer(Trainer):
         if 'azure_ml' in args.report_to:
             args.report_to.remove('azure_ml')
 
-        # adjust labels for both loss and metrics computation 
-        # in case there are multiple label components 
-        default_label_names = ["labels"]
-        args.label_names = args.label_names.split(",") if args.label_names else default_label_names
+
 
         super().__init__(
             model = model,
@@ -128,48 +140,48 @@ class Trainer(Trainer):
         loss, logits, labels = self.prediction_step(self.model,features,False)
         return outputter.realtime_output(features,logits)
 
-        def predict(self, description="Inference"):
-            test_dataset = self.eval_dataset
-            dataloader = self.get_test_dataloader(test_dataset)
-            start_time = time.time()
-            model = self._wrap_model(self.model, training=False)
-            if not self.is_in_train and self.args.fp16_full_eval:
-                model = model.half().to(self.args.device)
-            batch_size = dataloader.batch_size
-            num_examples = self.num_examples(dataloader)
-            logger.info(f"***** Running {description} *****")
-            logger.info(f"  Num examples = {num_examples}")
-            logger.info(f"  Batch size = {batch_size}")
-            model.eval()
-            with torch.profiler.profile(
-                    schedule=torch.profiler.schedule(
-                        wait=2,
-                        warmup=2,
-                        active=2,
-                        repeat=1),
-                    on_trace_ready=torch.profiler.tensorboard_trace_handler(self.args.logging_dir),
-                    with_stack=True
-            ) as profiler:
-                for step, inputs in enumerate(dataloader):
+    def predict(self, description="Inference"):
+        test_dataset = self.eval_dataset
+        dataloader = self.get_test_dataloader(test_dataset)
+        start_time = time.time()
+        model = self._wrap_model(self.model, training=False)
+        if not self.is_in_train and self.args.fp16_full_eval:
+            model = model.half().to(self.args.device)
+        batch_size = dataloader.batch_size
+        num_examples = self.num_examples(dataloader)
+        logger.info(f"***** Running {description} *****")
+        logger.info(f"  Num examples = {num_examples}")
+        logger.info(f"  Batch size = {batch_size}")
+        model.eval()
+        with torch.profiler.profile(
+                schedule=torch.profiler.schedule(
+                    wait=2,
+                    warmup=2,
+                    active=2,
+                    repeat=1),
+                on_trace_ready=torch.profiler.tensorboard_trace_handler(self.args.logging_dir),
+                with_stack=True
+        ) as profiler:
+            for step, inputs in enumerate(dataloader):
 
-                    batch = {}
-                    # keep batch features and drop the corresponding ones in inputs
-                    for fn in self.result_header:
-                        if fn in inputs:
-                            batch[fn] = inputs.pop(fn)
+                batch = {}
+                # keep batch features and drop the corresponding ones in inputs
+                for fn in self.result_header:
+                    if fn in inputs:
+                        batch[fn] = inputs.pop(fn)
 
-                    loss, logits, labels = self.prediction_step(model, inputs, False)
-                    self.outputter(batch, logits)
+                loss, logits, labels = self.prediction_step(model, inputs, False)
+                self.outputter(batch, logits)
 
-                    if self.args.logging_steps > 0 and step % self.args.logging_steps == 0 and step > 0:
-                        current_speed = speed_metrics("inference", start_time,
-                                                      step * self.args.per_device_eval_batch_size * self.args.world_size)
-                        current_speed[
-                            "job_progress"] = step * self.args.per_device_eval_batch_size * self.args.world_size / num_examples
-                        self.log(current_speed)
+                if self.args.logging_steps > 0 and step % self.args.logging_steps == 0 and step > 0:
+                    current_speed = speed_metrics("inference", start_time,
+                                                  step * self.args.per_device_eval_batch_size * self.args.world_size)
+                    current_speed[
+                        "job_progress"] = step * self.args.per_device_eval_batch_size * self.args.world_size / num_examples
+                    self.log(current_speed)
 
-            self.log(speed_metrics("inference", start_time, num_examples))
-            self.outputter.close()
+        self.log(speed_metrics("inference", start_time, num_examples))
+        self.outputter.close()
 
 
     def _maybe_log_save_evaluate(self, tr_loss, model, trial, epoch, ignore_keys_for_eval=None):
@@ -193,7 +205,6 @@ class Trainer(Trainer):
             self.log(logs)
 
         if self.control.should_evaluate:
-            self.model.config.decoding_method = 'seq'
             metrics = self.evaluate()
             num_samples = self.args.per_device_train_batch_size * self.args.world_size * self.state.global_step
             metrics["eval_num_samples_consumed"] = num_samples
@@ -233,8 +244,6 @@ class Trainer(Trainer):
         logger.info(f"  Batch size = {batch_size}")
 
         model.eval()
-        if self.args.recover_path != "":
-            model.load_state_dict(torch.load(self.args.recover_path))
         self.callback_handler.eval_dataloader = dataloader
         # Do this before wrapping.
         eval_dataset = dataloader.dataset
@@ -250,7 +259,7 @@ class Trainer(Trainer):
         all_losses = None
         all_preds = None
         all_labels = None
-        all_q2s = []
+        all_data_kds = []
         all_raw_src = []
         all_raw_src_origin = []
         # Will be useful when we have an iterable dataset so don't know its length.
@@ -265,7 +274,7 @@ class Trainer(Trainer):
                 # For batch samplers, batch_size is not known by the dataloader in advance.
                 if batch_size is None:
                     batch_size = observed_batch_size
-            q2s = inputs.get('q2')
+            data_kds = inputs.get('data_kd')
             raw_src = [
                 self.model.tokenizer.decode(inputs['input_ids'][i], skip_special_tokens=False, clean_up_tokenization_spaces=False) for i in
                 range(len(inputs['input_ids']))]
@@ -287,7 +296,7 @@ class Trainer(Trainer):
                 labels = self._pad_across_processes(labels)
                 labels = self._nested_gather(labels)
                 labels_host = labels if labels_host is None else nested_concat(labels_host, labels, padding_index=-100)
-            all_q2s.extend(q2s)
+            all_data_kds.extend(data_kds)
             all_raw_src.extend(raw_src)
             all_raw_src_origin.extend(raw_src_origin)
             self.control = self.callback_handler.on_prediction_step(self.args, self.state, self.control)
@@ -344,7 +353,9 @@ class Trainer(Trainer):
 
         # Metrics!
         if self.compute_metrics is not None and all_preds is not None and all_labels is not None:
-            metrics = self.compute_metrics(EvalPrediction(predictions=all_preds, label_ids=all_labels, q2_ids=all_q2s, raw_src=all_raw_src, raw_src_origin=all_raw_src_origin))
+            metrics = self.compute_metrics(EvalPrediction(predictions=all_preds, label_ids=all_labels,
+                                                          data_kd_ids=all_data_kds, raw_src=all_raw_src,
+                                                          raw_src_origin=all_raw_src_origin))
         else:
             metrics = {}
 
@@ -367,8 +378,6 @@ class MetricsCalculator:
         self.metrs = {}
         for m in metrics.split(","):
             _m = self.cvt_mtc(m, True)
-            # self.metrs[_m] = getattr(Metrics,_m)(model_name=model_name, cfg=cfgs, customize_cfg=task_cfgs)
-            print(_m)
             self.metrs[_m] = getattr(Metrics, _m)(model_name=model_name, cfg=cfgs, customize_cfg=task_cfgs,
                                                   tokenizer=tokenizer, model_dict=model_dict)
 

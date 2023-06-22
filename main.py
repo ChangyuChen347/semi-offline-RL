@@ -9,6 +9,7 @@ logging.set_verbosity_info()
 logging.enable_explicit_format()
 import logging as local_logging
 logger = logging.get_logger(__name__)
+logger.setLevel('INFO')
 local_logging.basicConfig(format="[%(levelname)s|%(filename)s:%(lineno)s] %(asctime)s >> %(message)s",level=logging.INFO)
 
 from data.tokenizer_utils import prepare_tokenizer
@@ -18,21 +19,12 @@ from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED, as_com
 # import time
 def main():
     base_args,train_args,model_args,task_args = parse_args()
-    print(model_args._name_or_path)
 
     auto_tokenizer = prepare_tokenizer(model_args._name_or_path, train_args.cache_dir,
                                        special_tokens=train_args.special_tokens)
 
-
     train_input, eval_input, predict_input = input_builder(model_args._name_or_path, train_args, task_args,
                                                            auto_tokenizer)
-
-    if hasattr(task_args, 'auto_model'):
-        print(task_args.auto_model) #transformers.models.auto.modeling_auto.AutoModelForSeq2SeqLM
-    else:
-        print(train_args.task)
-        print(getattr(models,train_args.task))
-        print(identifier(model_args))
 
     auto_model = task_args.auto_model if hasattr(task_args,'auto_model') else getattr(models,train_args.task)[identifier(model_args)]
     kwargs = {}

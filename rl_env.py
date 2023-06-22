@@ -15,7 +15,6 @@ from rouge_score import rouge_scorer
 from threading import Thread
 import torch.nn.functional as F
 from nltk.translate.meteor_score import meteor_score
-from decode_seq2seq import detokenize
 from sklearn.utils.extmath import softmax
 from multiprocessing import Pool
 import nltk
@@ -141,8 +140,6 @@ class RL_env(nn.Module):
         output_lines = traces
         b_output_lines = b_traces
         raw_tgt = refs
-        raw_tgt = [[t.lower() for t in e.split('<#REF#>')] for e in raw_tgt]
-        raw_tgt = [self.preprocess_lines(output_line) for output_line in raw_tgt]
         output_lines = [self.preprocess_lines(output_line) for output_line in output_lines]
         b_output_lines = [self.preprocess_lines(output_line) for output_line in b_output_lines]
         if self.sample_num != 0 or self.cand_num != 1:
@@ -156,12 +153,6 @@ class RL_env(nn.Module):
             b_rouge_list = self.get_squad_rouge_bleu(b_output_lines, sample_tgt, rouge_type=rouge_type)
         else:
             b_rouge_list = self.get_squad_rouge_bleu(b_output_lines,  raw_tgt, rouge_type=rouge_type)
-        if len(base_output_lines) != len(raw_tgt):
-            rep_num = len(base_output_lines) // len(raw_tgt)
-            sample_tgt = [t for t in raw_tgt for _ in range(rep_num)]
-            base_rouge_list = self.get_squad_rouge_bleu(base_output_lines, sample_tgt, rouge_type=rouge_type)
-        else:
-            base_rouge_list = self.get_squad_rouge_bleu(base_output_lines,  raw_tgt, rouge_type=rouge_type)
         reward = self.get_reward_tensor(rouge_list)
         b_reward = self.get_reward_tensor(b_rouge_list)
         return reward, b_reward
@@ -266,7 +257,7 @@ class RL_env(nn.Module):
             if reward_name == 'rouge':
                 reward, b_reward = self.get_rouge_reawrd(querys, raw_src, raw_tgt, traces, b_traces)
             elif reward_name == 'squad_rouge_bleu':
-                reward, b_reward, base_reward = self.get_squad_rouge_bleu_reawrd(querys, raw_src, raw_tgt, traces, b_traces,refs=refs)
+                reward, b_reward = self.get_squad_rouge_bleu_reawrd(querys, raw_src, raw_tgt, traces, b_traces,refs=refs)
             else:
                 raise NotImplementedError("the reward_name not implemented yet.")
             all_reward.append(reward)
