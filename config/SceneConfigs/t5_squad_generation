@@ -1,0 +1,22 @@
+--train_header data_src,data_gt,data_kd
+--train_model_header s2s_tokenize:data_src:data_gt:input,data_src,data_gt,data_kd
+--eval_header data_src,data_gt,data_kd
+--eval_model_header s2s_tokenize:data_src:data_gt:input,data_src,data_gt,data_kd
+--train_dir static_data/squad/squad_train.tsv \
+--eval_dir static_data/squad/squad_test.tsv \
+--eval_metrics bleu
+--predict_header data_src,data_gt
+--predict_model_header s2s_tokenize:data_src:input,data_src,data_gt
+--result_header data_src,data_gt
+--output_type generation
+--task seq2seq
+--max_length 64
+--min_length 0
+--num_beams 4
+--tok_max_length 512
+--model lmqg/t5-large-squad-qg
+--trainer rl
+--save_steps 10000000
+--no_repeat_ngram_size 0
+--early_stopping False
+bo

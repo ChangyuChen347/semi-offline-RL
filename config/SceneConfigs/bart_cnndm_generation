@@ -1,0 +1,24 @@
+--train_header data_src,data_gt,data_kd
+--train_model_header s2s_tokenize:data_src:data_gt:input,data_src,data_gt,data_kd
+--eval_header data_src,data_gt,data_kd
+--eval_model_header s2s_tokenize:data_src:data_gt:input,data_src,data_gt,data_kd
+--train_dir static_data/cnndm/cnndm_train.tsv \
+--eval_dir static_data/cnndm/cnndm_valid.tsv \
+--eval_metrics bleu
+--predict_header data_src,data_gt
+--predict_model_header s2s_tokenize:data_src:input,data_src,data_gt
+--result_header data_src,data_gt
+--output_type generation
+--task seq2seq
+--max_length 142
+--min_length 56
+--length_penalty 2
+--no_repeat_ngram_size 3
+--num_beams 4
+--tok_max_length 1024
+--model facebook/bart-large-cnn
+--trainer rl
+--save_steps 10000000
+--seq_decode_model bart
+
+bo
