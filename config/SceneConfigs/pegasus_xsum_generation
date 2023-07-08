@@ -15,9 +15,8 @@
 --min_length 12
 --num_beams 8
 --tok_max_length 512
---model Yale-LILY/brio-xsum-cased
+--model google/pegasus-xsum
 --trainer rl
 --save_steps 10000000
 --rouge_type 'xsum'
---reward_type 'rouges'
 bo

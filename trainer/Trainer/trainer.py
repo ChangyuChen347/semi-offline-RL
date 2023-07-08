@@ -46,6 +46,25 @@ from transformers.trainer_pt_utils import (
     nested_xla_mesh_reduce,
     reissue_pt_warnings,
 )
+from transformers.trainer_utils import (
+    PREFIX_CHECKPOINT_DIR,
+    BestRun,
+    EvalLoopOutput,
+    HPSearchBackend,
+    HubStrategy,
+    IntervalStrategy,
+    PredictionOutput,
+    ShardedDDPOption,
+    TrainerMemoryTracker,
+    TrainOutput,
+    default_compute_objective,
+    default_hp_space,
+    denumpify_detensorize,
+    get_last_checkpoint,
+    number_of_arguments,
+    set_seed,
+    speed_metrics,
+)
 import collections
 if is_datasets_available():
     import datasets
@@ -110,6 +129,9 @@ class Trainer(Trainer):
         az_logger = AmlLogger()
         if az_logger.active:
             self.add_callback(AmlLogger)
+
+        if self.args.recover != "":
+            model.load_state_dict(torch.load(args.recover))
     
     @staticmethod
     def _get_aml_logger():

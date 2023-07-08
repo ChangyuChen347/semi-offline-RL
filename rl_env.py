@@ -9,7 +9,7 @@ from torch import nn
 import time
 
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED, as_completed, ALL_COMPLETED
-from automatic_evaluation_tool import text_normalization
+from lmqg.automatic_evaluation_tool import text_normalization
 from rouge_score import rouge_scorer
 
 from threading import Thread
@@ -20,9 +20,9 @@ from multiprocessing import Pool
 import nltk
 from access_dict_by_dot import AccessDictByDot
 import rouge
-from automatic_evaluation_tool.bleu.bleu import Bleu as bleu_squad
+from lmqg.automatic_evaluation_tool.bleu.bleu import Bleu as bleu_squad
 bleu_squad = bleu_squad()
-from automatic_evaluation_tool.rouge import Rouge as rouge_squad
+from lmqg.automatic_evaluation_tool.rouge import Rouge as rouge_squad
 rouge_squad = rouge_squad()
 scorer_pool = [rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeL'], use_stemmer=True) for _ in range(100)]
 scorer_dict = {'12l': rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeL'], use_stemmer=True)}
@@ -71,7 +71,7 @@ from transformers.models.roberta.configuration_roberta import RobertaConfig
 class RL_env(nn.Module):
     def __init__(self,
                  tokenizer,
-                 reward_type='rouges',
+
                  metric_type='none',
                  distinct_normalize=False,
                  rewards='pc2',
@@ -83,7 +83,7 @@ class RL_env(nn.Module):
                  margin=0.001,
                  ):
         super().__init__()
-        self.reward_type = reward_type
+
         self.metric_type = metric_type
         self.rouge_type = rouge_type
         self.sample_num =sample_num
@@ -345,26 +345,25 @@ class RL_env(nn.Module):
             raise NotImplementedError("the rouge_type not implemented yet.")
 
     def get_rouge(self, output_lines, raw_tgt, rouge_type=None):
-        if self.reward_type == 'rouges':
-            if len(output_lines) <= 256:
-                res2 = self.get_rouge_sum(output_lines, raw_tgt)
-                return res2
-            else:
-                tasks_size = 32
-                task_num = (len(output_lines) + tasks_size - 1) // tasks_size
-                with Pool(processes=4) as pool:
-                    zip_output_tgt = [(output_lines[i], raw_tgt[i], i) for i in range(len(output_lines))]
-                    tasks = [[zip_output_tgt[task_id * tasks_size:(task_id + 1) * tasks_size], task_id] for task_id in
-                             range(task_num)]
-                    if self.rouge_type == '12l':
-                        for _ in pool.imap_unordered(get_rouge_sum, tasks):
-                            pass
-                    else:
-                        raise NotImplementedError("the rouge_type not implemented yet.")
-                res = [all_res_dict[i] for i in range(len(output_lines))]
-                return res
+
+        if len(output_lines) <= 256:
+            res2 = self.get_rouge_sum(output_lines, raw_tgt)
+            return res2
         else:
-            raise NotImplementedError("the reward_type not implemented yet.")
+            tasks_size = 32
+            task_num = (len(output_lines) + tasks_size - 1) // tasks_size
+            with Pool(processes=4) as pool:
+                zip_output_tgt = [(output_lines[i], raw_tgt[i], i) for i in range(len(output_lines))]
+                tasks = [[zip_output_tgt[task_id * tasks_size:(task_id + 1) * tasks_size], task_id] for task_id in
+                         range(task_num)]
+                if self.rouge_type == '12l':
+                    for _ in pool.imap_unordered(get_rouge_sum, tasks):
+                        pass
+                else:
+                    raise NotImplementedError("the rouge_type not implemented yet.")
+            res = [all_res_dict[i] for i in range(len(output_lines))]
+            return res
+
 
     def get_squad_rouge_bleu(self, output_lines, raw_tgt, rouge_type=None): # only for squad
         res = [0 for _ in range(len(output_lines))]

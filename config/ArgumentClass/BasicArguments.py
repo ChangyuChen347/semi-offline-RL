@@ -74,7 +74,6 @@ class TrainArguments(TrainingArguments):
     exp_name: str = field(default="exp",metadata={"help":"name for model saving path"})
     print_every: int = field(default=1000, metadata={"help":"print log every real steps"})
     save_every: int = field(default=1000, metadata={"help":"save model every real steps"})
-    reward_type: str = field(default='pc', metadata={"help": "`need to be developed` pc/pc2, rouge/rouges "})
     batch_mean: bool = field(default=True, metadata={"help": "`need to be developed` normalize loss by batch"})
 
     warmup_steps: int=field(default=-1)

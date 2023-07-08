@@ -6,7 +6,8 @@ from .BasicProcessor import BaseProcessor
 import random
 from transformers import logging
 logger = logging.get_logger(__name__)
-from typing import List 
+logger.setLevel('INFO')
+from typing import List
 import torch 
 import numpy as np 
 from trainer.Tools.task_utils import TaskInfo

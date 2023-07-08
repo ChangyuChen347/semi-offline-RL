@@ -18,4 +18,5 @@
 --trainer rl
 --save_steps 10000000
 --no_repeat_ngram_size 0
+--early_stopping False
 bo

@@ -8,7 +8,7 @@ from transformers import (
 )
 import config.ArgumentClass as ArgumentClass
 logger = logging.get_logger(__name__)
-
+logger.setLevel('INFO')
 def identifier(cls):
     return cls.__class__.__name__.split(".")[-1][:-6]
 

@@ -3,7 +3,7 @@ import inspect
 from transformers import logging
 
 logger = logging.get_logger(__name__)
-
+logger.setLevel('INFO')
 
 def replace(target_obj, is_allowed=True):
     """ Copy from fastseq: https://github.com/microsoft/fastseq

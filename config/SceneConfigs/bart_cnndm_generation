@@ -1,0 +1,24 @@
+--train_header query,doc,data_kd
+--train_model_header s2s_tokenize:query:doc:input,query,doc,data_kd
+--eval_header query,doc,data_kd
+--eval_model_header s2s_tokenize:query:doc:input,query,doc,data_kd
+--train_dir datas/cnn_train_no_pre
+--eval_dir datas/cnn_eval_no_pre
+--eval_metrics bleu
+--predict_header query,doc
+--predict_model_header s2s_tokenize:query:input,query,doc
+--result_header query,doc
+--output_type generation
+--task seq2seq
+--max_length 142
+--min_length 56
+--length_penalty 2
+--no_repeat_ngram_size 3
+--num_beams 4
+--tok_max_length 1024
+--model facebook/bart-large-cnn
+--trainer rl
+--save_steps 10000000
+--seq_decode_model bart
+
+bo

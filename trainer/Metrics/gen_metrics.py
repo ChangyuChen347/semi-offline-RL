@@ -5,7 +5,7 @@ from transformers import AutoTokenizer
 import nltk
 from rouge import Rouge as RougeMetrics # use py-rouge package
 from rouge_score import rouge_scorer
-from automatic_evaluation_tool import text_normalization
+from lmqg.automatic_evaluation_tool import text_normalization
 import numpy as np
 from transformers import logging
 import scipy
@@ -15,7 +15,7 @@ from functools import reduce
 import operator
 import pickle as pkl
 logger = logging.get_logger(__name__)
-
+logger.setLevel('INFO')
 @register_metrics("bleu")
 class Bleu():
     def __init__(self, model_name, cfg, **kwargs):
@@ -53,11 +53,10 @@ class Bleu():
                 curr_pred = self.tokenizer.decode(r,skip_special_tokens=True,clean_up_tokenization_spaces=False)
                 if len(curr_pred) == 0:
                     curr_pred = "EOS"
-                # curr_pred = ' '.join(nltk.word_tokenize(curr_pred))
+
                 pred.append(curr_pred)
                 all_pred.append(curr_pred)
-           # bleu.append(max([nltk.translate.bleu_score.sentence_bleu([nltk.word_tokenize(truth.lower())],nltk.word_tokenize(p.lower()),smoothing_function=nltk.translate.bleu_score.SmoothingFunction().method1) for p in pred]))
-           #  truth = ' '.join(nltk.word_tokenize(truth))
+
             bleu.append(max([nltk.translate.bleu_score.sentence_bleu([nltk.word_tokenize(truth.lower())],
                                                                      nltk.word_tokenize(p.lower()),
                                                                      weights=[0.25, 0.25, 0.25, 0.25],
@@ -88,8 +87,6 @@ class Bleu():
                                                                      smoothing_function=nltk.translate.bleu_score.SmoothingFunction().method1,
                                                                      weights=[0, 0, 0, 1])
                              for p in pred]))
-            #if i < self.print_instance and self.cfg.local_rank <= 0:
-            #    logger.info("Truth: "+truth+" Predict: "+" ### ".join(pred))
 
             for t in pred:
                 length.append(len(t.split()))
@@ -99,10 +96,9 @@ class Bleu():
 from collections import Counter
 from nltk.translate import bleu_score
 from nltk.translate.bleu_score import SmoothingFunction
-
-from automatic_evaluation_tool.bleu.bleu import Bleu as bleu_squad
+from lmqg.automatic_evaluation_tool.bleu.bleu import Bleu as bleu_squad
+from lmqg.automatic_evaluation_tool.rouge import Rouge as rouge_squad
 bleu_squad = bleu_squad()
-from automatic_evaluation_tool.rouge import Rouge as rouge_squad
 rouge_squad = rouge_squad()
 
 
@@ -113,12 +109,17 @@ class SQUAD_BLEU():
         self.tokenizer = tokenizer if tokenizer is not None else AutoTokenizer.from_pretrained(model_name)
         self.cfg = cfg
 
-        if self.cfg.eval_dir == 'squad_validation.tsv':
+        if self.cfg.eval_dir == 'static_data/squad/squad_valid.tsv':
             self.src = open('sentence-valid.txt').readlines()
             self.tgt = open('question-valid.txt').readlines()
-        elif self.cfg.eval_dir == 'squad_test.tsv':
+        elif self.cfg.eval_dir == 'static_data/squad/squad_test.tsv':
             self.src = open('sentence-test.txt').readlines()
             self.tgt = open('question-test.txt').readlines()
+        elif self.cfg.eval_dir == 'static_data/squad/squad_test.5.tsv':
+            self.src = open('sentence-test.txt').readlines()
+            self.tgt = open('question-test.txt').readlines()
+        else:
+            raise NotImplementedError("the path for the eval_dir not implemented yet.")
 
         self.print_instance = 10
         try:
@@ -174,12 +175,17 @@ class SQUAD_ROUGE():
         self.tokenizer = tokenizer if tokenizer is not None else AutoTokenizer.from_pretrained(model_name)
         self.cfg = cfg
 
-        if self.cfg.eval_dir == 'squad_validation.tsv':
+        if self.cfg.eval_dir == 'static_data/squad/squad_valid.tsv':
             self.src = open('sentence-valid.txt').readlines()
             self.tgt = open('question-valid.txt').readlines()
-        elif self.cfg.eval_dir == 'squad_test.tsv':
+        elif self.cfg.eval_dir == 'static_data/squad/squad_test.tsv':
             self.src = open('sentence-test.txt').readlines()
             self.tgt = open('question-test.txt').readlines()
+        elif self.cfg.eval_dir == 'static_data/squad/squad_test.5.tsv':
+            self.src = open('sentence-test.txt').readlines()
+            self.tgt = open('question-test.txt').readlines()
+        else:
+            raise NotImplementedError("the path for the eval_dir not implemented yet.")
 
         self.print_instance = 10
 
@@ -238,7 +244,7 @@ class Rouge():
         max_n: N-grams for ROUGE-N if specify. Default:1
         """
         self.cfg = cfg
-        self.ml_eval = cfg.eval_dir == 'sample/test_ml.sample.tsv'
+
         self.print_instance = 10
 
         try:
@@ -292,7 +298,7 @@ class Rouge():
                     tmp_rouge[k].append(rouge_score[k]["f"])
             for k in tmp_rouge:
                 rouge_list[k].append(max(tmp_rouge[k]))
-            
+
             if i < self.print_instance and self.cfg.local_rank <= 0:
                 logger.info("Truth: "+truth+" Predict: "+" ### ".join(pred))
 
@@ -300,9 +306,7 @@ class Rouge():
         scores = dict()
         for k in rouge_list:
             scores[k] = np.mean(rouge_list[k])
-            if self.ml_eval:
-                res_dict=self.split_by_lang(langs=EvalPredict.raw_src, res=rouge_list[k])
-                print(k, res_dict)
+
         length = []
         for t in preds:
             length.append(len(t.split()))

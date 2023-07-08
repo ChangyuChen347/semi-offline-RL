@@ -26,25 +26,7 @@ import math
 import nltk
 import torch.nn.functional as F
 import random
-from transformers.trainer_utils import (
-    PREFIX_CHECKPOINT_DIR,
-    BestRun,
-    EvalLoopOutput,
-    HPSearchBackend,
-    HubStrategy,
-    IntervalStrategy,
-    PredictionOutput,
-    ShardedDDPOption,
-    TrainerMemoryTracker,
-    TrainOutput,
-    default_compute_objective,
-    default_hp_space,
-    denumpify_detensorize,
-    get_last_checkpoint,
-    number_of_arguments,
-    set_seed,
-    speed_metrics,
-)
+
 from transformers.trainer_pt_utils import (
     DistributedLengthGroupedSampler,
     DistributedSamplerWithLoop,
@@ -204,7 +186,7 @@ class Trainer(BaseTrainer):
         self.tokenizer = auto_tokenizer
         self.rl_env = RL_env(
             auto_tokenizer,
-            reward_type=self.args.reward_type,
+
             rewards=self.args.rewards,
             rouge_type=self.args.rouge_type,
             sample_num=model.config.sample_num,
