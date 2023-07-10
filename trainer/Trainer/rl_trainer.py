@@ -842,9 +842,11 @@ class Trainer(BaseTrainer):
             kd_inputs['labels'] = kd_seq_labels
             second_kd_inputs_labels = kd_inputs['labels']
 
-
-        model.sharing_encoder(True) # sharing encoder for computing mle loss and rl loss since the src is the same like BRIO (https://github.com/yixinL7/BRIO)
-
+        # sharing encoder for computing mle loss and rl loss since the src is the same like BRIO (https://github.com/yixinL7/BRIO)
+        if isinstance(model, torch.nn.DataParallel) or isinstance(model, torch.nn.parallel.DistributedDataParallel):
+            model.module.sharing_encoder(True)
+        else:
+            model.sharing_encoder(True)
         # stack decoder inputs for computing mle (g_res) and rl (s_res)
         batch_size = inputs['labels'].shape[0]
         s_res = kd_inputs['labels'].reshape(batch_size, 1, -1)
@@ -975,9 +977,10 @@ class Trainer(BaseTrainer):
             if self.args.past_index >= 0:
                 self._past = outputs[self.args.past_index]
 
-
-
-        model.sharing_encoder(False)
+        if isinstance(model, torch.nn.DataParallel) or isinstance(model, torch.nn.parallel.DistributedDataParallel):
+            model.module.sharing_encoder(False)
+        else:
+            model.sharing_encoder(False)
 
         if self.smoother is not None and labels_ is not None:
             loss = self.smoother(outputs, labels_)
