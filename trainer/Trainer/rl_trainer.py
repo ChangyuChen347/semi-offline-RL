@@ -894,7 +894,11 @@ class Trainer(BaseTrainer):
 
 
         # post process the mask and normalize the logprobs by the number of masked positions and samples
-        if (model.config.sample_num != 0 or self.args.cand_num !=1):
+        if isinstance(model, torch.nn.DataParallel) or isinstance(model, torch.nn.parallel.DistributedDataParallel):
+            sample_num = model.module.config.sample_num
+        else:
+            sample_num = model.config.sample_num
+        if (sample_num != 0 or self.args.cand_num !=1):
             cand_mask = ~log_probs.data.eq(0)
             # mask the corresponding logprob if the sampled token is a special token
             new_cand_mask = cand_mask & ~((y_s != eos_token_id) & (y_s != pad_token_id))
@@ -925,7 +929,7 @@ class Trainer(BaseTrainer):
             cand_mask = torch.where(torch.isinf(cand_mask), torch.full_like(cand_mask, 0), cand_mask)
             if self.args.length_normalize_4_rl:
                 log_probs = log_probs * cand_mask
-                log_probs = log_probs / (model.config.sample_num + 1) / self.args.cand_num
+                log_probs = log_probs / (sample_num + 1) / self.args.cand_num
 
         rl_loss = 0
         greedy_reward_dict = {}

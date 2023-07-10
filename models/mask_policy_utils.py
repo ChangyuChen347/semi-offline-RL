@@ -222,8 +222,8 @@ class MaskPolicy():
             return output
         else:
             return output, y_b, y_s, max_ids, masked_ids, input_ids, labels,log_probs, log_probs_all, \
-                mask_labels, masked_pos_shift, \
-                masked_pos_non_shift, decoder_input_ids
+                mask_labels.to(input_ids.device), masked_pos_shift.to(input_ids.device), \
+                masked_pos_non_shift.to(input_ids.device), decoder_input_ids
 
     def split_return(self, lm_logits, input_ids, labels,masked_pos_shift,
                      masked_pos_non_shift, bs, return_dict, outputs, mask_labels, decoder_input_ids, tokenizer):
